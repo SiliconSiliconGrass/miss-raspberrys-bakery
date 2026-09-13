@@ -448,6 +448,7 @@ onBeforeUnmount(() => {
         </div>
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
+    <div class="miss-raspberry-cute"></div>
     <audio src="/music/Comical Oasis.mp3" autoplay loop></audio>
     <GameAutomationPanel :bridge="automationBridge" />
 </template>
@@ -579,6 +580,12 @@ html {
     100% { transform: scale(1); }
 }
 
+@keyframes swing {
+    0% { transform: rotate(-5deg) }
+    50% { transform: rotate(10deg); }
+    100% { transform: rotate(-5deg) }
+}
+
 .submit-button {
     font-family: 'Ruantang', sans-serif;
     font-size: min(2.6vw, 3.8vh);
@@ -625,6 +632,17 @@ html {
 
 .card.flour {
     background-image: url('/images/it/flour.png');
+}
+
+.miss-raspberry-cute {
+    position: fixed;
+    left: 10px;
+    bottom: 10px;
+    width: 20vw;
+    aspect-ratio: 1;
+    background-image: url('/images/ui/miss-raspberry-cute-1.png');
+    background-size: contain;
+    animation: swing ease-in-out 1s infinite;
 }
 
 </style>
