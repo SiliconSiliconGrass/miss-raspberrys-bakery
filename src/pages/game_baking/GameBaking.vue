@@ -435,6 +435,17 @@ onBeforeUnmount(() => {
         class="quiz-card-area"
         :class="{ 'is-fading-out': fadePhase === 'out', 'is-fading-in': fadePhase === 'in' }"
     ></div>
+    <!--
+        Celebration played together with the submit fade: a giant "energy bread"
+        drops in from above the screen, lands in the middle and then pops away.
+        It is kept before the automation panel on purpose: both are fixed
+        elements without a z-index, so the panel stays readable on top of it.
+    -->
+    <div
+        class="energy-bread"
+        :class="{ 'is-falling': fadePhase !== 'idle' }"
+        aria-hidden="true"
+    ></div>
     <div class="submit-area">
         <div class="preview" :class="{ 'is-perfect': isPerfectMatch }">
             <div class="preview-row">
@@ -477,6 +488,66 @@ html {
 
 .is-fading-in {
     animation: fade-in 1000ms ease-out forwards;
+}
+
+/*
+ * The energy bread that drops in with every submission.
+ * Its animation runs for 2 * FADE_DURATION ms, so it spans the fade-out of the
+ * old board (which is swapped while invisible) and the fade-in of the new one.
+ */
+@keyframes energy-bread-drop {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) translateY(-135vh) rotate(-14deg) scale(0.85);
+    }
+    12% {
+        opacity: 1;
+    }
+    46% {
+        transform: translate(-50%, -50%) translateY(0) rotate(0deg) scale(1);
+        animation-timing-function: ease-out;
+    }
+    54% {
+        transform: translate(-50%, -50%) translateY(-3vh) rotate(1.5deg) scale(1.02);
+        animation-timing-function: ease-in;
+    }
+    62% {
+        transform: translate(-50%, -50%) translateY(0) rotate(0deg) scale(1);
+        animation-timing-function: ease-in-out;
+    }
+    76% {
+        opacity: 1;
+        transform: translate(-50%, -50%) translateY(0) rotate(0deg) scale(1);
+        animation-timing-function: ease-out;
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) translateY(0) rotate(0deg) scale(1.5);
+    }
+}
+
+.energy-bread {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: min(78vw, 78vh);
+    aspect-ratio: 1;
+    background-image: url('/images/it/energy_bread.svg');
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    /* charged look: a warm glow around the bread's silhouette */
+    filter: drop-shadow(0 0 3vmin rgba(255, 214, 82, 0.85)) drop-shadow(0 0 0.8vmin rgba(255, 247, 214, 0.9));
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    will-change: transform, opacity;
+}
+
+.energy-bread.is-falling {
+    /* 2 * FADE_DURATION, keep in sync with the script */
+    /* the default ease-in makes the bread accelerate on its way down */
+    animation: energy-bread-drop 2000ms ease-in forwards;
 }
 
 .answer-area {
