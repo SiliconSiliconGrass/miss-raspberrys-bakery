@@ -1,40 +1,282 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import BakingBoard from './BakingBoard';
+import QuizGenerator from './QuizGenerator';
 
-const cardArea = ref<HTMLDivElement | null>(null)
 
-function setCardArea(numRows: number, numCols: number) {
+const CARD_CLASS_NAME_DICT: Record<number, string> =  {
+    0: 'card water-bucket',
+    1: 'card flour',
+}
+
+const QUIZ_CARD_GAP = 10 // px
+const BOARD_MARGIN_RATIO = 0.05 // ratio of the shorter screen edge
+const QUIZ_HORIZONTAL_MARGIN_RATIO = 0.25 // per side, of the viewport width
+const ANSWER_AREA_CLEARANCE = 24 // px between the answer area and the quiz area
+const FADE_DURATION = 1000 // ms, the submit transition takes 2 of these (2s in total)
+
+
+let quizBoard: BakingBoard | null = null
+let answerBoard: BakingBoard | null = null
+
+const totalScore = ref(0)
+const similarity = ref(0)
+const expectedScore = ref(0)
+
+const isSubmitting = ref(false)
+const fadePhase = ref<'idle' | 'out' | 'in'>('idle')
+let fadeTimerIds: number[] = []
+
+const similarityText = computed(() => `${(similarity.value * 100).toFixed(2)}%`)
+const expectedScoreText = computed(() => expectedScore.value.toFixed(2))
+const isPerfectMatch = computed(() => similarity.value === 1)
+
+const quizCardArea = ref<HTMLDivElement | null>(null)
+const answerCardArea = ref<HTMLDivElement | null>(null)
+const answerArea = ref<HTMLDivElement | null>(null)
+
+
+/**
+ * Size the quiz area so that it always fits inside the screen with a margin:
+ * more than 25vw of free space on each side, and no overlap with the answer area.
+ */
+function fitQuizCardArea() {
+    if (!quizBoard || !quizCardArea.value) {
+        return
+    }
+
+    const numRows = quizBoard.numRows
+    const numCols = quizBoard.numCols
+
+    const verticalMargin = Math.max(Math.min(window.innerWidth, window.innerHeight) * BOARD_MARGIN_RATIO, 16)
+    // the answer area sits at the top-left, the board is centered horizontally,
+    // so clearing its right edge is enough to keep the two from overlapping
+    const answerAreaRight = answerArea.value?.getBoundingClientRect().right ?? 0
+    const horizontalMargin = Math.max(
+        window.innerWidth * QUIZ_HORIZONTAL_MARGIN_RATIO + 2,
+        answerAreaRight + ANSWER_AREA_CLEARANCE,
+        16,
+    )
+
+    const availWidth = window.innerWidth - horizontalMargin * 2
+    const availHeight = window.innerHeight - verticalMargin * 2
+
+    // cards are square, so the card size is bounded by both the width and the height budget
+    const cardSize = Math.min(
+        (availWidth - (numCols - 1) * QUIZ_CARD_GAP) / numCols,
+        (availHeight - (numRows - 1) * QUIZ_CARD_GAP) / numRows,
+    )
+
+    quizCardArea.value.style.width = `${cardSize * numCols + (numCols - 1) * QUIZ_CARD_GAP}px`
+}
+
+
+function setAnswerCardArea() {
+    const numRows = answerBoard!.numRows
+    const numCols = answerBoard!.numCols
     const cards: HTMLDivElement[] = []
-    
-    // 设置容器为 Grid
-    if (cardArea.value) {
-        cardArea.value.style.display = 'grid'
-        cardArea.value.style.gridTemplateColumns = `repeat(${numCols}, 1fr)`
-        cardArea.value.style.gap = '10px'
+
+    if (answerCardArea.value) {
+        answerCardArea.value.style.display = 'grid'
+        answerCardArea.value.style.gridTemplateColumns = `repeat(${numCols}, 1fr)`
+        answerCardArea.value.style.gap = '2px'
     }
     
     for (let i = 0; i < numRows; i++) {
         for (let j = 0; j < numCols; j++) {
             const card = document.createElement('div')
-            card.id = `card_${i}_${j}`
+            card.id = `answer_card_${i}_${j}`
             card.className = 'card'
-            
-            // 正方形关键：宽高比 1:1
             card.style.aspectRatio = '1 / 1'
             card.style.width = '100%'
-            
+            card.className = CARD_CLASS_NAME_DICT[answerBoard?.getMatrix()[i]![j]!] as string
             cards.push(card)
         }
     }
     
-    // 一次性添加所有卡片
-    cardArea.value?.replaceChildren(...cards)
+    answerCardArea.value?.replaceChildren(...cards)
 }
 
 
+function setQuizCardArea() {
+    const numRows = quizBoard!.numRows
+    const numCols = quizBoard!.numCols
+    const cards: HTMLDivElement[] = []
+
+    if (quizCardArea.value) {
+        quizCardArea.value.style.display = 'grid'
+        quizCardArea.value.style.gridTemplateColumns = `repeat(${numCols}, 1fr)`
+        quizCardArea.value.style.gap = `${QUIZ_CARD_GAP}px`
+    }
+    
+    for (let i = 0; i < numRows; i++) {
+        for (let j = 0; j < numCols; j++) {
+            const card = document.createElement('div')
+            card.id = `quiz_card_${i}_${j}`
+            card.className = 'card'
+            card.style.aspectRatio = '1 / 1'
+            card.style.width = '100%'
+            card.className = CARD_CLASS_NAME_DICT[quizBoard?.getMatrix()[i]![j]!] as string
+
+            card.addEventListener("mousedown", (e) => {
+                quizBoard!.tapAt(i, j)
+                refreshPreview()
+            })
+
+            cards.push(card)
+        }
+    }
+    
+    quizCardArea.value?.replaceChildren(...cards)
+}
+
+
+let animationCardAngleTargetCache: number[][] | null = null
+let animationCardAngleCurrentCache: number[][] | null = null
+let animationCardTypeCache: number[][] | null = null
+let prevAnimationTime: number = -1 // ms
+function cardFlipAnimationStep() {
+    const currTime = Date.now()
+    const elapsedTime = currTime - prevAnimationTime // ms
+
+    for (let rowInd = 0; rowInd < (animationCardAngleTargetCache?.length as number); rowInd++) {
+        const row = animationCardAngleTargetCache![rowInd]
+        for (let colInd = 0; colInd < (row?.length as number); colInd++) {
+            // animation param update
+            if (animationCardTypeCache![rowInd]![colInd] !== quizBoard!.getMatrix()[rowInd]![colInd]) {
+                animationCardAngleTargetCache![rowInd]![colInd] = 180 // deg
+            } else {
+                animationCardAngleTargetCache![rowInd]![colInd] = 0 // deg
+            }
+
+            const currAngle = animationCardAngleCurrentCache![rowInd]![colInd] as number
+            const targetAngle = animationCardAngleTargetCache![rowInd]![colInd] as number
+
+            const newAngle = currAngle + (targetAngle - currAngle) * Math.min(1.0, 0.1 * (elapsedTime / (1000/60)))
+
+            if (newAngle > 90) {
+                animationCardAngleCurrentCache![rowInd]![colInd] = newAngle - 180 // deg
+                animationCardTypeCache![rowInd]![colInd] = quizBoard!.getMatrix()[rowInd]![colInd] as number
+            } else {
+                animationCardAngleCurrentCache![rowInd]![colInd] = newAngle // deg
+            }
+
+            // animation render
+            const card = document.getElementById(`quiz_card_${rowInd}_${colInd}`) as HTMLDivElement
+            card.style.transform = `rotateY(${animationCardAngleCurrentCache![rowInd]![colInd]}deg)`;
+            card.className = CARD_CLASS_NAME_DICT[animationCardTypeCache![rowInd]![colInd] as number] as string
+        }
+    }
+
+    prevAnimationTime = currTime
+    requestAnimationFrame(cardFlipAnimationStep)
+}
+
+
+function setAnimationCache() {
+    animationCardAngleTargetCache = quizBoard!.getMatrix().map(row => row.map(() => 0))
+    animationCardAngleCurrentCache = quizBoard!.getMatrix().map(row => row.map(() => 0))
+    animationCardTypeCache = quizBoard!.getMatrix().map(row => [...row])
+}
+
+
+function initRandomQuiz() {
+    const quizGenerator = new QuizGenerator()
+    quizBoard = quizGenerator.generate()
+    answerBoard = quizGenerator.getAnswer()
+    setAnimationCache()
+}
+
+
+/** Ratio of the cells that already match the answer board. */
+function calcSimilarity() {
+    const quizMatrix = quizBoard!.getMatrix()
+    const answerMatrix = answerBoard!.getMatrix()
+
+    let sameCount = 0
+    for (let rowInd = 0; rowInd < quizBoard!.numRows; rowInd++) {
+        for (let colInd = 0; colInd < quizBoard!.numCols; colInd++) {
+            if (quizMatrix[rowInd]![colInd] === answerMatrix[rowInd]![colInd]) {
+                sameCount++
+            }
+        }
+    }
+
+    return sameCount / (quizBoard!.numRows * quizBoard!.numCols)
+}
+
+
+/** 1 for a perfect match, otherwise half of the similarity. */
+function calcScore() {
+    const similarity = calcSimilarity()
+    const score = similarity === 1 ? 10 : 0.1 * similarity
+    return roundToTwoDecimals(score)
+}
+
+
+function roundToTwoDecimals(value: number) {
+    return Math.round(value * 100) / 100
+}
+
+
+function clearFadeTimers() {
+    for (const timerId of fadeTimerIds) {
+        window.clearTimeout(timerId)
+    }
+    fadeTimerIds = []
+}
+
+
+/** Refresh the similarity / expected score shown for the current level. */
+function refreshPreview() {
+    similarity.value = calcSimilarity()
+    expectedScore.value = calcScore()
+}
+
+
+function startNextQuiz() {
+    initRandomQuiz()
+    setQuizCardArea()
+    setAnswerCardArea()
+    fitQuizCardArea()
+    refreshPreview()
+}
+
+
+function submitAnswer() {
+    // ignore taps while the fade transition is playing, so the score cannot be farmed
+    if (isSubmitting.value) {
+        return
+    }
+    isSubmitting.value = true
+
+    totalScore.value = roundToTwoDecimals(totalScore.value + calcScore())
+    fadePhase.value = 'out'
+
+    clearFadeTimers()
+    fadeTimerIds.push(window.setTimeout(() => {
+        // the boards are swapped while they are fully transparent
+        startNextQuiz()
+        fadePhase.value = 'in'
+
+        fadeTimerIds.push(window.setTimeout(() => {
+            fadePhase.value = 'idle'
+            isSubmitting.value = false
+            fadeTimerIds = []
+        }, FADE_DURATION))
+    }, FADE_DURATION))
+}
+
 
 onMounted(() => {
-    setCardArea(5, 4)
+    startNextQuiz()
+    cardFlipAnimationStep()
+    window.addEventListener('resize', fitQuizCardArea)
+})
+
+onBeforeUnmount(() => {
+    window.removeEventListener('resize', fitQuizCardArea)
+    clearFadeTimers()
 })
 
 
@@ -43,7 +285,36 @@ onMounted(() => {
 
 
 <template>
-    <div ref="cardArea" class="card-area"></div>
+    <div
+        ref="answerArea"
+        class="answer-area"
+        :class="{ 'is-fading-out': fadePhase === 'out', 'is-fading-in': fadePhase === 'in' }"
+    >
+        <div class="answer-label">目标配方</div>
+        <div ref="answerCardArea" class="answer-card-area"></div>
+    </div>
+    <div class="score-area">
+        <div class="score-label">总得分</div>
+        <div class="score-value">{{ totalScore.toFixed(2) }}</div>
+    </div>
+    <div
+        ref="quizCardArea"
+        class="quiz-card-area"
+        :class="{ 'is-fading-out': fadePhase === 'out', 'is-fading-in': fadePhase === 'in' }"
+    ></div>
+    <div class="submit-area">
+        <div class="preview" :class="{ 'is-perfect': isPerfectMatch }">
+            <div class="preview-row">
+                <span class="preview-label">相似度</span>
+                <span class="preview-value">{{ similarityText }}</span>
+            </div>
+            <div class="preview-row">
+                <span class="preview-label">预期得分</span>
+                <span class="preview-value">{{ expectedScoreText }}</span>
+            </div>
+        </div>
+        <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
+    </div>
 </template>
 
 
@@ -52,16 +323,173 @@ html {
     background-color: #b27f00;
 }
 
-.card-area {
+@keyframes fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.is-fading-out {
+    pointer-events: none;
+    /* keep the duration in sync with FADE_DURATION in the script */
+    animation: fade-out 1000ms ease-in forwards;
+}
+
+.is-fading-in {
+    animation: fade-in 1000ms ease-out forwards;
+}
+
+.answer-area {
+    position: fixed;
+    left: min(5vw, 5vh);
+    top: min(5vw, 5vh);
+    width: min(14vw, 22vh);
+    display: flex;
+    flex-direction: column;
+    gap: min(1.4vh, 14px);
+}
+
+.answer-label {
+    font-family: 'Ruantang', sans-serif;
+    font-size: min(2.2vw, 3.4vh);
+    line-height: 1.1;
+    color: #fff6e0;
+    text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
+}
+
+.answer-card-area {
+    width: 100%;
+}
+
+.score-area {
+    position: fixed;
+    right: min(5vw, 5vh);
+    top: min(5vw, 5vh);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: min(1.4vh, 14px);
+}
+
+.score-label {
+    font-family: 'Ruantang', sans-serif;
+    font-size: min(2.2vw, 3.4vh);
+    line-height: 1.1;
+    color: #fff6e0;
+    text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
+}
+
+.score-value {
+    font-family: 'Ruantang', sans-serif;
+    font-size: min(3.2vw, 5vh);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    color: #ffffff;
+    text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
+}
+
+.submit-area {
+    position: fixed;
+    right: min(5vw, 5vh);
+    bottom: min(5vw, 5vh);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: min(2vh, 20px);
+}
+
+.preview {
+    display: flex;
+    flex-direction: column;
+    gap: min(0.8vh, 8px);
+    font-family: 'Ruantang', sans-serif;
+    font-size: min(1.8vw, 2.8vh);
+    line-height: 1.2;
+    color: #fff6e0;
+    text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
+}
+
+.preview-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1em;
+}
+
+.preview-value {
+    min-width: 5em;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: #ffffff;
+}
+
+.preview.is-perfect {
+    color: #9dffb6;
+    text-shadow: 0 0 6px rgba(70, 255, 128, 0.95), 0 0 16px rgba(33, 201, 79, 0.75);
+    transform-origin: 100% 50%;
+    animation: perfect-pop 600ms ease-out 1;
+}
+
+.preview.is-perfect .preview-value {
+    color: #ddffe5;
+}
+
+@keyframes perfect-pop {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.16); }
+    65% { transform: scale(0.97); }
+    100% { transform: scale(1); }
+}
+
+.submit-button {
+    font-family: 'Ruantang', sans-serif;
+    font-size: min(2.6vw, 3.8vh);
+    line-height: 1.1;
+    padding: 0.4em 1.2em;
+    color: #7c3200;
+    background-color: #ffe9b3;
+    border: none;
+    border-radius: 999px;
+    box-shadow: 0 3px 0 rgba(124, 50, 0, 0.5);
+    cursor: pointer;
+}
+
+.submit-button:active {
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 rgba(124, 50, 0, 0.5);
+}
+
+.submit-button:disabled {
+    opacity: 0.55;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+.quiz-card-area {
     position: fixed;
     width: min(30vw, 80vh);
+    /* backstop for the "more than 25vw on each side" rule */
+    max-width: 50vw;
     left: 50vw;
     top: 50vh;
     transform: translate(-50%, -50%);
 }
 
 .card {
-    border: 1px solid black;
+    background-color: white;
+    background-size: contain;
+    border-radius: 10px;
+}
+
+.card.water-bucket {
+    background-image: url('/images/it/water_bucket.png');
+}
+
+.card.flour {
+    background-image: url('/images/it/flour.png');
 }
 
 </style>

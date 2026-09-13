@@ -1,7 +1,10 @@
 import BakingBoard from "./BakingBoard";
 
 function randint(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+    if (max === min) {
+        return min
+    }
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 export default class QuizGenerator {
@@ -9,6 +12,9 @@ export default class QuizGenerator {
     _answer: BakingBoard
 
     constructor(answer?: BakingBoard, numRows?: number, numCols?: number, numTypes?: number) {
+
+        numTypes = 2 // currently only 2 types
+        
         if (!answer) {
             if (!numRows) {
                 numRows = randint(3, 7)
@@ -23,7 +29,8 @@ export default class QuizGenerator {
             // zero matrix
             this._answer = new BakingBoard(numRows, numCols, numTypes)
 
-            const symetricType = randint(0, 4)
+            // diagonal symmetries are only valid on a square board
+            const symetricType = randint(0, numRows === numCols ? 4 : 2)
             const numVar = randint(10, 20)
             for (let i = 0; i < numVar; i++) {
                 const rowInd = randint(0, numRows - 1)
@@ -67,6 +74,10 @@ export default class QuizGenerator {
                 for (let target of targets) {
                     const rowInd = target[0] as number
                     const colInd = target[1] as number
+                    if (rowInd < 0 || rowInd >= numRows || colInd < 0 || colInd >= numCols) {
+                        continue
+                    }
+                    
                     this._answer._matrix[rowInd]![colInd] = typeId
                 }
             }
@@ -74,6 +85,11 @@ export default class QuizGenerator {
         } else {
             this._answer = answer
         }
+    }
+
+
+    getAnswer() {
+        return this._answer
     }
 
 
@@ -85,11 +101,12 @@ export default class QuizGenerator {
             this._answer.numTypes,
             this._answer._matrix.map(row => [...row])
         )
-        const numTaps = randint(10, 20)
+        const numTaps = randint(3, 10)
         for (let i = 0; i < numTaps; i++) {
             const rowInd = randint(0, this._answer.numRows - 1)
             const colInd = randint(0, this._answer.numCols - 1)
             quiz.tapAt(rowInd, colInd)
+            console.log(`solution: tap at row ${rowInd + 1}, col ${colInd + 1}`)
         }
         return quiz
     }

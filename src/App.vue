@@ -1,6 +1,6 @@
 <template>
     <router-view />
-    <!-- <audio src="/music/Piece and Piece.mp3" autoplay loop></audio> -->
+    <audio src="/music/Piece and Piece.mp3" autoplay loop></audio>
 </template>
 
 <style>
