@@ -1,0 +1,20 @@
+[project]
+name = "solution-baking"
+version = "0.1.0"
+description = "WebSocket automation harness that plays the baking levels for you"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.1",
+    "websockets>=13.0",
+]
+
+[tool.uv]
+# This folder is a plain script collection, not an installable package, so
+# "uv run main.py" just puts numpy/websockets in .venv and runs the script.
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+]
