@@ -2,6 +2,18 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import BakingBoard from './BakingBoard';
 import QuizGenerator from './QuizGenerator';
+import {
+    GameAutomationBridge,
+    GameAutomationPanel,
+    type AutomationBoardSnapshot,
+} from '../../automation';
+
+
+/** One automation action: tapping the card at `rowInd` / `colInd`. */
+type BakingTapAction = {
+    rowInd: number
+    colInd: number
+}
 
 
 const CARD_CLASS_NAME_DICT: Record<number, string> =  {
@@ -240,17 +252,38 @@ function startNextQuiz() {
     setAnswerCardArea()
     fitQuizCardArea()
     refreshPreview()
+    automationBridge.notifyLevelStarted()
 }
 
 
-function submitAnswer() {
+/** Result of a submission, also returned to automation clients. */
+type SubmitResult = {
+    similarity: number
+    expectedScore: number
+    totalScore: number
+    perfect: boolean
+}
+
+
+/**
+ * Score the current board and roll the next one in.
+ * Returns null when a submission is already playing.
+ */
+function submitAnswer(): SubmitResult | null {
     // ignore taps while the fade transition is playing, so the score cannot be farmed
     if (isSubmitting.value) {
-        return
+        return null
     }
-    isSubmitting.value = true
 
-    totalScore.value = roundToTwoDecimals(totalScore.value + calcScore())
+    const submittedSimilarity = roundToTwoDecimals(calcSimilarity())
+    const submittedScore = calcScore()
+    const submittedTotalScore = roundToTwoDecimals(totalScore.value + submittedScore)
+
+    isSubmitting.value = true
+    // starts the 2 s submit cooldown shared with the automation protocol
+    automationBridge.markSubmitted()
+
+    totalScore.value = submittedTotalScore
     fadePhase.value = 'out'
 
     clearFadeTimers()
@@ -265,18 +298,118 @@ function submitAnswer() {
             fadeTimerIds = []
         }, FADE_DURATION))
     }, FADE_DURATION))
+
+    return {
+        similarity: submittedSimilarity,
+        expectedScore: submittedScore,
+        totalScore: submittedTotalScore,
+        perfect: submittedSimilarity === 1,
+    }
 }
+
+
+/** Copy of a board in the shape shared by every automation client. */
+function boardSnapshot(board: BakingBoard): AutomationBoardSnapshot {
+    return {
+        numRows: board.numRows,
+        numCols: board.numCols,
+        numTypes: board.numTypes,
+        matrix: board.getMatrix().map(row => [...row]),
+    }
+}
+
+
+function parseIndex(value: unknown, name: string, max: number): number {
+    const num = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+    if (typeof num !== 'number' || !Number.isInteger(num) || num < 0 || num >= max) {
+        throw new Error(`${name} must be an integer in [0, ${max - 1}], got ${JSON.stringify(value)}`)
+    }
+    return num
+}
+
+
+/**
+ * The baking game's adapter for the shared automation protocol.
+ * Everything protocol related (connection, retries, action buffer, rate
+ * limits) lives in `GameAutomationBridge`, this object only touches the board.
+ */
+const automationBridge = new GameAutomationBridge<BakingTapAction, Record<string, unknown>>({
+    gameId: 'baking',
+
+    getState() {
+        return {
+            started: quizBoard !== null && answerBoard !== null,
+            board: quizBoard ? boardSnapshot(quizBoard) : null,
+            target: answerBoard ? boardSnapshot(answerBoard) : null,
+            metrics: {
+                similarity: roundToTwoDecimals(calcSimilarity()),
+                expectedScore: calcScore(),
+                totalScore: totalScore.value,
+                isPerfect: isPerfectMatch.value,
+            },
+            busy: isSubmitting.value,
+        }
+    },
+
+    describeLevel() {
+        return {
+            numRows: quizBoard?.numRows ?? 0,
+            numCols: quizBoard?.numCols ?? 0,
+            numTypes: quizBoard?.numTypes ?? 0,
+            actionKind: 'tap',
+            actionFields: { rowInd: 'int', colInd: 'int' },
+        }
+    },
+
+    normalizeAction(raw) {
+        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+            throw new Error('a tap action must be an object like {"rowInd": 0, "colInd": 0}')
+        }
+        const { rowInd, colInd } = raw as Record<string, unknown>
+        if (!quizBoard) {
+            throw new Error('the board is not ready yet')
+        }
+        return {
+            rowInd: parseIndex(rowInd, 'rowInd', quizBoard.numRows),
+            colInd: parseIndex(colInd, 'colInd', quizBoard.numCols),
+        }
+    },
+
+    applyAction(action) {
+        quizBoard!.tapAt(action.rowInd, action.colInd)
+        refreshPreview()
+    },
+
+    canApplyAction() {
+        return !isSubmitting.value
+    },
+
+    canSubmit() {
+        return !isSubmitting.value
+    },
+
+    submit() {
+        const result = submitAnswer()
+        if (!result) {
+            throw new Error('a submission is already in progress')
+        }
+        return result
+    },
+})
 
 
 onMounted(() => {
     startNextQuiz()
     cardFlipAnimationStep()
     window.addEventListener('resize', fitQuizCardArea)
+    // dial the player's automation program, retrying once per second
+    automationBridge.connect()
 })
 
 onBeforeUnmount(() => {
     window.removeEventListener('resize', fitQuizCardArea)
     clearFadeTimers()
+    automationBridge.dispose()
 })
 
 
@@ -315,6 +448,8 @@ onBeforeUnmount(() => {
         </div>
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
+    <audio src="/music/Comical Oasis.mp3" autoplay loop></audio>
+    <GameAutomationPanel :bridge="automationBridge" />
 </template>
 
 

@@ -1,10 +1,21 @@
 <script setup lang="ts">
-    window.addEventListener("click", (e) => {
+    import { onBeforeUnmount, onMounted } from 'vue';
+
+    function startGame() {
         window.location.href = "/game-baking"
-    });
-    window.addEventListener("keydown", (e) => {
-        window.location.href = "/game-baking"
-    });
+    }
+
+    // these live on window, so they must be removed when the home page is left:
+    // otherwise every click inside the game reloads the page
+    onMounted(() => {
+        window.addEventListener("click", startGame)
+        window.addEventListener("keydown", startGame)
+    })
+
+    onBeforeUnmount(() => {
+        window.removeEventListener("click", startGame)
+        window.removeEventListener("keydown", startGame)
+    })
 </script>
 
 <template>
@@ -15,6 +26,7 @@
         CLICK OR PRESS ANY KEY TO START
     </div>
     <div class="bg-home"></div>
+    <audio src="/music/Piece and Piece.mp3" autoplay loop></audio>
 </template>
 
 <style scoped>
