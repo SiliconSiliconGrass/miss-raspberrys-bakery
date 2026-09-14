@@ -442,7 +442,7 @@ onBeforeUnmount(() => {
         elements without a z-index, so the panel stays readable on top of it.
     -->
     <div
-        class="energy-bread"
+        class="raspberry-cake"
         :class="{ 'is-falling': fadePhase !== 'idle' }"
         aria-hidden="true"
     ></div>
@@ -495,7 +495,7 @@ html {
  * Its animation runs for 2 * FADE_DURATION ms, so it spans the fade-out of the
  * old board (which is swapped while invisible) and the fade-in of the new one.
  */
-@keyframes energy-bread-drop {
+@keyframes raspberry-cake-drop {
     0% {
         opacity: 0;
         transform: translate(-50%, -50%) translateY(-135vh) rotate(-14deg) scale(0.85);
@@ -526,13 +526,13 @@ html {
     }
 }
 
-.energy-bread {
+.raspberry-cake {
     position: fixed;
     left: 50%;
     top: 50%;
     width: min(78vw, 78vh);
     aspect-ratio: 1;
-    background-image: url('/images/it/energy_bread.svg');
+    background-image: url('/images/it/raspberry_cake_transparent.png');
     background-repeat: no-repeat;
     background-position: center;
     background-size: contain;
@@ -544,10 +544,10 @@ html {
     will-change: transform, opacity;
 }
 
-.energy-bread.is-falling {
+.raspberry-cake.is-falling {
     /* 2 * FADE_DURATION, keep in sync with the script */
     /* the default ease-in makes the bread accelerate on its way down */
-    animation: energy-bread-drop 2000ms ease-in forwards;
+    animation: raspberry-cake-drop 2000ms ease-in forwards;
 }
 
 .answer-area {
