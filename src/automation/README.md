@@ -107,6 +107,71 @@
 提交后关卡会在约 2 秒的淡入淡出中切换，期间 `state.busy` 为 `true`，
 `actions` 会暂缓执行（留在 buffer 里），`submit` 返回 `game_busy`。
 
+## 货物游戏（GameCargo）
+
+`states` 应答的 `payload`：
+
+```json
+{
+  "gameId": "cargo",
+  "serverTime": 1730000000000,
+  "level": { "numRows": 8, "numCols": 8, "numTypes": 1, "numPieces": 12, "actionKinds": ["place", "clear"] },
+  "state": {
+    "started": true,
+    "numRows": 8,
+    "numCols": 8,
+    "numTypes": 1,
+    "rowDemands": [[1], [2], [0]],
+    "colDemands": [[1], [0], [2]],
+    "fixed": [{ "row": 0, "col": 2, "typeId": -1 }],
+    "pieces": [
+      { "ind": 0, "typeId": 1, "shape": [[1, 1], [0, 1]], "width": 2, "height": 2,
+        "placement": { "row": 3, "col": 4, "rotation": 1 }, "unstable": false }
+    ],
+    "metrics": { "satisfaction": 0.83, "expectedScore": 0.08, "totalScore": 10.1, "isDemandMet": false },
+    "busy": false
+  },
+  "queue": { "pending": 3, "executed": 5, "actionIntervalMs": 1000, "submitReadyInMs": 0, "submitIntervalMs": 2000 }
+}
+```
+
+`state` 与烘焙游戏不同，它一次给全：`rowDemands[rowInd][typeInd]` 和
+`colDemands[colInd][typeInd]` 分别是这一行 / 这一列要求多少个 `typeInd + 1`
+种类的块；`fixed` 是开局就占住的格子（`typeId` 为 `-1` 表示这个格子不能放
+任何东西）；`pieces` 里每个 piece 给出 `shape`（`shape[y][x]`，`1` 是块）、
+`width` / `height` 和当前的 `placement`（`null` 表示还在 pieceBar 里），
+动作里的 `pieceInd` 就是这个 `ind`。`metrics.satisfaction` 是需求满足度
+（0 … 1），`metrics.isDemandMet` 为 `true` 时它正好是 1。
+
+`actions` 的 action 有这三种写法：
+
+```json
+{ "kind": "place", "pieceInd": 0, "row": 0, "col": 0, "rotation": 0 }
+{ "kind": "place", "pieces": [ { "pieceInd": 0, "row": 0, "col": 0 }, { "pieceInd": 1, "row": 4, "col": 4, "rotation": 2 } ] }
+{ "kind": "clear" }
+```
+
+* `place` 把某个 piece **旋转后外框**的左上角放到（`row`, `col`），坐标从棋盘
+  左上角算起。`rotation` 是顺时针 90° 的个数，任意整数都可以（`5` 与 `1`
+  是同一个朝向），省略则保持它当前的朝向。一个 action 里可以带多个 piece
+  （`pieces` 数组），它们同属**一步**，仍然是一秒一步。
+* `clear` 把棋盘上所有 piece 送回 pieceBar。
+* 旋转后放不进棋盘、`row` / `col` 越界都会被整批拒收并返回 `invalid_action`。
+* 放上去会压到别的块或 `fixed` 格子时**照样放**，该 piece 记为 `unstable`
+  并红光提示；下一次动到某个 piece（玩家拖拽或自动化都算）时，会把其余
+  `unstable` 的 piece 送回 pieceBar。
+
+`submit` 的应答：
+
+```json
+{ "satisfaction": 1, "expectedScore": 10, "totalScore": 20.1, "demandMet": true, "submittedAt": 1730000000000 }
+```
+
+提交后棋盘和 pieceBar 会在约 2 秒的淡入淡出中换成下一题，期间
+`state.busy` 为 `true`，`actions` 会暂缓执行（留在 buffer 里），`submit`
+返回 `game_busy`。手动按「提交」也会占用这 2 秒，所以玩家程序和手动提交
+不会互相抢节奏。
+
 ## 接到新小游戏上
 
 ```ts
