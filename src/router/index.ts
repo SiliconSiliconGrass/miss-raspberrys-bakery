@@ -11,15 +11,13 @@ const routes = [
   {
     path: '/game-baking',
     name: 'GameBaking',
-    // 懒加载，TS自动推断
     component: () => import('../pages/game_baking/GameBaking.vue'),
   },
-//   {
-//     path: '/user',
-//     name: 'User',
-//     component: () => import('../views/User.vue'),
-//   },
-//   // 404 兜底路由，放最后
+  {
+    path: '/game-cargo',
+    name: 'GameCargo',
+    component: () => import('../pages/game_cargo/GameCargo.vue'),
+  },
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
