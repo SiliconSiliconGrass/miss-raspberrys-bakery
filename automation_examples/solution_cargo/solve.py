@@ -42,7 +42,7 @@ def solve(column_sums: list[int],
           pieces: list[Piece],
           fixed_ones: list[tuple[int, int]]=[],
           fixed_zeros: list[tuple[int, int]]=[],
-          max_shapes: int=100,
+          max_shapes: int=1000,
           max_solutions_per_shape: int=10,
           max_solutions: int | None=1) -> list[list[tuple[int, int, int, int]]]:
     """找出一套摆放方案。
@@ -65,10 +65,14 @@ def solve(column_sums: list[int],
     possible_shapes = iter_shapes(column_sums, row_sums, fixed_ones, fixed_zeros,
                                   max_solutions=max_shapes)
 
+    # print('num_shapes', len(list(possible_shapes)))
+
     formatted_solutions: list[list[tuple[int, int, int, int]]] = []
 
+    i = 0
     for shape in possible_shapes:
-
+        i += 1
+        print('trying shape', i)
         for x, y in fixed_ones + fixed_zeros:
             shape[y][x] = 0
 
