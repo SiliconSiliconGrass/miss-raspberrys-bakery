@@ -73,7 +73,7 @@ const SUBMIT_INTERVAL = 2000
 const ITEM_IMAGE_LIST = [
     // '/images/it/flour.png',
     // '/images/it/water_bucket.png',
-    '/images/it/raspberry_cake_transparent.png',
+    '/images/it/energy_bread.svg',
 ]
 
 

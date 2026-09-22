@@ -532,7 +532,7 @@ html {
     top: 50%;
     width: min(78vw, 78vh);
     aspect-ratio: 1;
-    background-image: url('/images/it/raspberry_cake_transparent.png');
+    background-image: url('/images/it/energy_bread.svg');
     background-repeat: no-repeat;
     background-position: center;
     background-size: contain;
