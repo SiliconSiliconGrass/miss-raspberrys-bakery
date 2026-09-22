@@ -1743,7 +1743,7 @@ onBeforeUnmount(() => {
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
     <GameAutomationPanel :bridge="automationBridge" />
-    <audio src="/music/Piece and Piece.mp3" autoplay loop></audio>
+    <audio src="/music/ms4.mp3" autoplay loop></audio>
 </template>
 
 

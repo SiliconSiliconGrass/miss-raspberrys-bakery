@@ -26,7 +26,7 @@
         CLICK OR PRESS ANY KEY TO START
     </div>
     <div class="bg-home"></div>
-    <audio src="/music/Piece and Piece.mp3" autoplay loop></audio>
+    <audio src="/music/ms2.mp3" autoplay loop></audio>
 </template>
 
 <style scoped>

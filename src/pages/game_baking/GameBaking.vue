@@ -460,7 +460,7 @@ onBeforeUnmount(() => {
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
     <div class="miss-raspberry-cute"></div>
-    <audio src="/music/Comical Oasis.mp3" autoplay loop></audio>
+    <audio src="/music/ms1.mp3" autoplay loop></audio>
     <GameAutomationPanel :bridge="automationBridge" />
 </template>
 
