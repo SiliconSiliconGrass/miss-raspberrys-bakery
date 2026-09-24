@@ -7,6 +7,7 @@ import {
     GameAutomationPanel,
     type AutomationBoardSnapshot,
 } from '../../automation';
+import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
 
 /** Background music of this game, loaded from wherever the app is served. */
@@ -464,6 +465,7 @@ onBeforeUnmount(() => {
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
     <div class="miss-raspberry-cute"></div>
+    <BackHomeButton />
     <audio :src="BGM_SRC" autoplay loop></audio>
     <GameAutomationPanel :bridge="automationBridge" />
 </template>
@@ -557,7 +559,8 @@ html {
 .answer-area {
     position: fixed;
     left: min(5vw, 5vh);
-    top: min(5vw, 5vh);
+    /* below the back-to-home button, which lives in this corner */
+    top: calc(min(5vw, 5vh) + var(--back-home-room));
     width: min(14vw, 22vh);
     display: flex;
     flex-direction: column;

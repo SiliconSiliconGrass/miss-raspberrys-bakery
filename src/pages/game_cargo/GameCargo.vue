@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 import { GameAutomationBridge, GameAutomationPanel } from '../../automation';
+import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
 
 import type GameState from './GameState';
@@ -62,6 +63,16 @@ const SIDE_PANEL_CLEARANCE = 12
 const AUTOMATION_PANEL_WIDTH = 220
 const AUTOMATION_PANEL_WIDTH_RATIO = 0.2
 const AUTOMATION_PANEL_INSET_RATIO = 0.05
+/**
+ * Room the back-to-home button takes at the top left corner: its height (a ratio
+ * of the viewport height, clamped) plus the gap kept under it, in px. Keep all of
+ * them in sync with `--back-home-height` / `--back-home-gap` in `BackHomeButton`.
+ */
+const BACK_HOME_HEIGHT_RATIO = 0.056
+const BACK_HOME_MIN_HEIGHT = 36
+const BACK_HOME_MAX_HEIGHT = 56
+const BACK_HOME_GAP_RATIO = 0.016
+const BACK_HOME_MIN_GAP = 10
 /** How long one half of the submit transition takes, in ms: submitting waits twice that. */
 const FADE_DURATION = 1000
 /** The shortest time between two submissions, in ms. */
@@ -514,11 +525,18 @@ function fitLayout() {
     const boardHeight = game.numRows * blockSize + (game.numRows - 1) * CELL_GAP
     const areaInset = labelThickness + labelEdge
 
-    // the piece bar: as tall as the screen allows, against the left edge of the screen
+    // the back-to-home button sits in the top left corner, right above the piece bar
+    const backHomeRoom = Math.round(
+        clamp(viewHeight * BACK_HOME_HEIGHT_RATIO, BACK_HOME_MIN_HEIGHT, BACK_HOME_MAX_HEIGHT)
+        + Math.max(BACK_HOME_MIN_GAP, Math.min(viewWidth, viewHeight) * BACK_HOME_GAP_RATIO),
+    )
+
+    // the piece bar: as tall as what is left of the screen allows, against the left
+    // edge of the screen and below the back-to-home button
     pieceBar.value.style.left = `${margin}px`
-    pieceBar.value.style.top = `${margin}px`
+    pieceBar.value.style.top = `${margin + backHomeRoom}px`
     pieceBar.value.style.width = `${barWidth}px`
-    pieceBar.value.style.height = `${viewHeight - margin * 2}px`
+    pieceBar.value.style.height = `${viewHeight - margin * 2 - backHomeRoom}px`
 
     // the board area: centered in the space which is left of the piece bar
     const areaLeft = margin + barWidth + barBoardGap
@@ -1747,6 +1765,7 @@ onBeforeUnmount(() => {
         </div>
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
+    <BackHomeButton />
     <GameAutomationPanel :bridge="automationBridge" />
     <audio :src="BGM_SRC" autoplay loop></audio>
 </template>
