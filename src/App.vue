@@ -4,8 +4,8 @@
 
 <style>
 @font-face {
-    font-family: "Ruantang";
-    src: url("/fonts/上首软糖体.ttf") format("truetype");
+    font-family: "DymonShouXieTi";
+    src: url("/fonts/Dymon-ShouXieTi.otf") format("opentype");
 }
 
 * {

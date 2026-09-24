@@ -171,7 +171,7 @@
 
 .title {
     position: fixed;
-    font-family: 'Ruantang';
+    font-family: 'DymonShouXieTi';
     color: #7c3200;
     font-size: min(8vw, 800vh / 9);
     z-index: 10;
@@ -181,7 +181,7 @@
 
 .blink-tip {
     position: fixed;
-    font-family: 'Ruantang';
+    font-family: 'DymonShouXieTi';
     font-size: min(2vw, 200vh / 9);
     z-index: 10;
     left: 50vw;
@@ -217,7 +217,7 @@
 }
 
 .picker-title {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(4.4vw, 6.6vh);
     line-height: 1.1;
     color: #7c3200;
@@ -267,14 +267,14 @@
 }
 
 .level-title {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(2.4vw, 3.6vh);
     line-height: 1.1;
     text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
 }
 
 .level-subtitle {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.5vw, 2.4vh);
     line-height: 1.2;
     color: rgba(255, 246, 224, 0.82);
@@ -289,7 +289,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.9vh, 19px);
     color: #7c3200;
     background-color: rgba(255, 246, 224, 0.85);
@@ -297,7 +297,7 @@
 }
 
 .picker-tip {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.5vw, 2.2vh);
     color: rgba(124, 50, 0, 0.75);
 }

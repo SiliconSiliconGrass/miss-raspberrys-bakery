@@ -36,7 +36,7 @@ function backHome() {
     box-sizing: border-box;
     height: var(--back-home-height);
     padding: 0 min(2.4vw, 26px);
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.6vw, 2.4vh);
     color: #7c3200;
     background-color: rgba(255, 246, 224, 0.88);

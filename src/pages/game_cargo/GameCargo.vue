@@ -2089,7 +2089,7 @@ html {
     position: absolute;
     right: -0.14em;
     bottom: -0.14em;
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: calc(var(--label-icon-size) * 0.48);
     line-height: 1;
     color: #fff8e6;
@@ -2265,7 +2265,7 @@ html {
 .piece-bar-hint {
     flex: none;
     padding: min(1.6vh, 16px) 8px min(1vh, 10px);
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.3vw, 2vh);
     line-height: 1.3;
     text-align: center;
@@ -2340,7 +2340,7 @@ html {
 }
 
 .score-label {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(2.2vw, 3.4vh);
     line-height: 1.1;
     color: #fff6e0;
@@ -2348,7 +2348,7 @@ html {
 }
 
 .score-value {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(3.2vw, 5vh);
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
@@ -2370,7 +2370,7 @@ html {
     display: flex;
     flex-direction: column;
     gap: min(0.8vh, 8px);
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     /* keep this in sync with PANEL_FONT_*_RATIO in the script: the room the board
        keeps free for the panel is computed from the same numbers */
     /* the same size as the preview of the baking game */
@@ -2413,7 +2413,7 @@ html {
 }
 
 .submit-button {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(2.6vw, 3.8vh);
     line-height: 1.1;
     padding: 0.4em 1.2em;
@@ -2528,7 +2528,7 @@ html {
     justify-content: center;
     /* the label sits out on the round side of the disc, not in the corner */
     padding: 0 0 26% 26%;
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: clamp(15px, 4.6vw, 24px);
     color: #7c3200;
     background-color: rgba(255, 246, 224, 0.92);

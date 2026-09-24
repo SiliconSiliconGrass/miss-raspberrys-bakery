@@ -682,7 +682,7 @@ html {
 }
 
 .answer-label {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(2.2vw, 3.4vh);
     line-height: 1.1;
     color: #fff6e0;
@@ -704,7 +704,7 @@ html {
 }
 
 .score-label {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(2.2vw, 3.4vh);
     line-height: 1.1;
     color: #fff6e0;
@@ -712,7 +712,7 @@ html {
 }
 
 .score-value {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(3.2vw, 5vh);
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
@@ -734,7 +734,7 @@ html {
     display: flex;
     flex-direction: column;
     gap: min(0.8vh, 8px);
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.8vw, 2.8vh);
     line-height: 1.2;
     color: #fff6e0;
@@ -779,7 +779,7 @@ html {
 }
 
 .submit-button {
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(2.6vw, 3.8vh);
     line-height: 1.1;
     padding: 0.4em 1.2em;

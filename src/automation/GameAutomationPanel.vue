@@ -183,7 +183,7 @@ function onRetry() {
     display: flex;
     flex-direction: column;
     gap: min(1vh, 8px);
-    font-family: 'Ruantang', sans-serif;
+    font-family: 'DymonShouXieTi', sans-serif;
     font-size: min(1.5vw, 2.2vh);
     line-height: 1.3;
     color: #fff6e0;
