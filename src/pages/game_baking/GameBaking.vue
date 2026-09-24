@@ -9,6 +9,7 @@ import {
 } from '../../automation';
 import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
+import { getBackHomeRoom, isPhoneScreen, setPhoneLayoutFlag } from '../../utils/layout';
 
 /** Background music of this game, loaded from wherever the app is served. */
 const BGM_SRC = assetUrl('music/ms1.mp3')
@@ -30,6 +31,14 @@ const BOARD_MARGIN_RATIO = 0.05 // ratio of the shorter screen edge
 const QUIZ_HORIZONTAL_MARGIN_RATIO = 0.25 // per side, of the viewport width
 const ANSWER_AREA_CLEARANCE = 24 // px between the answer area and the quiz area
 const FADE_DURATION = 1000 // ms, the submit transition takes 2 of these (2s in total)
+/** Room between two cards of the target board, in px. */
+const ANSWER_CARD_GAP = 2
+/** Phone layout: free space kept around everything, as a ratio of the shortest screen edge. */
+const PHONE_MARGIN_RATIO = 0.03
+/** Phone layout: the target board is this share of the play board, a little smaller than it. */
+const PHONE_ANSWER_RATIO = 0.72
+/** Phone layout: room kept under the play board, in px, when the bottom bar cannot be measured. */
+const PHONE_MIN_BOTTOM_ROOM = 96
 
 
 let quizBoard: BakingBoard | null = null
@@ -50,15 +59,53 @@ const isPerfectMatch = computed(() => similarity.value === 1)
 const quizCardArea = ref<HTMLDivElement | null>(null)
 const answerCardArea = ref<HTMLDivElement | null>(null)
 const answerArea = ref<HTMLDivElement | null>(null)
+const answerLabel = ref<HTMLDivElement | null>(null)
+const submitArea = ref<HTMLDivElement | null>(null)
+
+/** True while the screen is laid out the phone way: a portrait screen. */
+const isPhone = ref(isPhoneScreen())
+// already marked on the way in, so that the first frame is not drawn in the wrong shape
+setPhoneLayoutFlag('baking', isPhone.value)
 
 
 /**
- * Size the quiz area so that it always fits inside the screen with a margin:
- * more than 25vw of free space on each side, and no overlap with the answer area.
+ * Size the two boards for the shape of the screen: a portrait screen gets the
+ * phone layout, every other screen the wide one.
  */
 function fitQuizCardArea() {
     if (!quizBoard || !quizCardArea.value) {
         return
+    }
+
+    const nextIsPhone = isPhoneScreen()
+    isPhone.value = nextIsPhone
+    setPhoneLayoutFlag('baking', nextIsPhone)
+    if (nextIsPhone) {
+        fitPhoneQuizCardArea()
+    } else {
+        fitWideQuizCardArea()
+    }
+}
+
+
+/**
+ * The wide layout: the target recipe in the top left corner, the play board in
+ * the middle of the screen. The play board is sized so that it always fits with
+ * a margin: more than 25vw of free space on each side, and no overlap with the
+ * target recipe.
+ */
+function fitWideQuizCardArea() {
+    if (!quizBoard || !quizCardArea.value) {
+        return
+    }
+
+    // the phone layout sizes and moves these two, the wide one leaves them to the
+    // style: cleared before anything is measured, so that the measuring sees the
+    // wide layout
+    quizCardArea.value.style.top = ''
+    quizCardArea.value.style.maxWidth = ''
+    if (answerCardArea.value) {
+        answerCardArea.value.style.width = ''
     }
 
     const numRows = quizBoard.numRows
@@ -87,6 +134,70 @@ function fitQuizCardArea() {
 }
 
 
+/**
+ * The phone layout: the target board on top of the screen, the play board under
+ * it, both in one column. The play board gets what is left of the screen, and
+ * the target board is a little smaller than it.
+ */
+function fitPhoneQuizCardArea() {
+    if (!quizBoard || !answerBoard || !quizCardArea.value || !answerCardArea.value) {
+        return
+    }
+
+    const viewWidth = window.innerWidth
+    const viewHeight = window.innerHeight
+    const numRows = quizBoard.numRows
+    const numCols = quizBoard.numCols
+    const margin = Math.round(clamp(Math.min(viewWidth, viewHeight) * PHONE_MARGIN_RATIO, 10, 22))
+    const gap = Math.max(10, margin)
+    // the back-to-home button sits in the top left corner, the total score in the right one
+    const topRoom = getBackHomeRoom(viewWidth, viewHeight)
+    // the preview and the submit button sit in the bottom right corner
+    const bottomRoom = Math.max(
+        (submitArea.value?.offsetHeight ?? 0) + margin,
+        PHONE_MIN_BOTTOM_ROOM,
+    )
+    const answerLabelHeight = answerLabel.value?.offsetHeight ?? 0
+    const freeHeight = Math.max(160, viewHeight - topRoom - bottomRoom)
+    const availWidth = viewWidth - margin * 2
+
+    // the two boards are sized together: a smaller target board leaves the play
+    // board more room, which allows a bigger target board again, so it takes a few
+    // passes before both of them settle
+    let answerCardSize = (availWidth * PHONE_ANSWER_RATIO - (numCols - 1) * ANSWER_CARD_GAP) / numCols
+    let playCardSize = answerCardSize
+    for (let pass = 0; pass < 3; pass++) {
+        const answerHeight = numRows * answerCardSize + (numRows - 1) * ANSWER_CARD_GAP
+        const playHeight = freeHeight - answerLabelHeight - gap - answerHeight
+        playCardSize = Math.max(12, Math.min(
+            (availWidth - (numCols - 1) * QUIZ_CARD_GAP) / numCols,
+            (playHeight - (numRows - 1) * QUIZ_CARD_GAP) / numRows,
+        ))
+        answerCardSize = Math.min(answerCardSize, playCardSize * PHONE_ANSWER_RATIO)
+    }
+
+    const answerHeight = numRows * answerCardSize + (numRows - 1) * ANSWER_CARD_GAP
+    const playWidth = playCardSize * numCols + (numCols - 1) * QUIZ_CARD_GAP
+    const playHeight = playCardSize * numRows + (numRows - 1) * QUIZ_CARD_GAP
+
+    answerCardArea.value.style.width = `${Math.round(
+        answerCardSize * numCols + (numCols - 1) * ANSWER_CARD_GAP,
+    )}px`
+    quizCardArea.value.style.width = `${Math.round(playWidth)}px`
+    quizCardArea.value.style.maxWidth = 'none'
+
+    // the play board is centered in the room which is left under the target board
+    const bandTop = topRoom + answerLabelHeight + answerHeight + gap
+    const bandHeight = Math.max(playHeight, viewHeight - bottomRoom - bandTop)
+    quizCardArea.value.style.top = `${Math.round(bandTop + bandHeight / 2)}px`
+}
+
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value))
+}
+
+
 function setAnswerCardArea() {
     const numRows = answerBoard!.numRows
     const numCols = answerBoard!.numCols
@@ -95,7 +206,7 @@ function setAnswerCardArea() {
     if (answerCardArea.value) {
         answerCardArea.value.style.display = 'grid'
         answerCardArea.value.style.gridTemplateColumns = `repeat(${numCols}, 1fr)`
-        answerCardArea.value.style.gap = '2px'
+        answerCardArea.value.style.gap = `${ANSWER_CARD_GAP}px`
     }
     
     for (let i = 0; i < numRows; i++) {
@@ -134,7 +245,8 @@ function setQuizCardArea() {
             card.style.width = '100%'
             card.className = CARD_CLASS_NAME_DICT[quizBoard?.getMatrix()[i]![j]!] as string
 
-            card.addEventListener("mousedown", (e) => {
+            // a pointer covers the mouse and the finger of a phone alike
+            card.addEventListener("pointerdown", () => {
                 quizBoard!.tapAt(i, j)
                 refreshPreview()
             })
@@ -413,6 +525,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
     window.removeEventListener('resize', fitQuizCardArea)
+    setPhoneLayoutFlag('baking', false)
     clearFadeTimers()
     automationBridge.dispose()
 })
@@ -428,7 +541,7 @@ onBeforeUnmount(() => {
         class="answer-area"
         :class="{ 'is-fading-out': fadePhase === 'out', 'is-fading-in': fadePhase === 'in' }"
     >
-        <div class="answer-label">目标配方</div>
+        <div ref="answerLabel" class="answer-label">目标配方</div>
         <div ref="answerCardArea" class="answer-card-area"></div>
     </div>
     <div class="score-area">
@@ -451,7 +564,7 @@ onBeforeUnmount(() => {
         :class="{ 'is-falling': fadePhase !== 'idle' }"
         aria-hidden="true"
     ></div>
-    <div class="submit-area">
+    <div ref="submitArea" class="submit-area">
         <div class="preview" :class="{ 'is-perfect': isPerfectMatch }">
             <div class="preview-row">
                 <span class="preview-label">相似度</span>
@@ -467,7 +580,8 @@ onBeforeUnmount(() => {
     <div class="miss-raspberry-cute"></div>
     <BackHomeButton />
     <audio :src="BGM_SRC" autoplay loop></audio>
-    <GameAutomationPanel :bridge="automationBridge" />
+    <!-- a phone plays with a finger: nothing to connect a player program to -->
+    <GameAutomationPanel v-if="!isPhone" :bridge="automationBridge" />
 </template>
 
 
@@ -721,6 +835,77 @@ html {
     background-image: url('/images/ui/miss-raspberry-cute-1.png');
     background-size: contain;
     animation: swing ease-in-out 1s infinite;
+}
+
+/* ---------------------------------------------------------------------------
+ * the phone layout
+ *
+ * A portrait screen gets one column: the target recipe on top of it, the play
+ * board under the recipe, and the score, the preview and the submit button in
+ * the corners around them. The script sizes the two boards; these rules place
+ * them and keep the browser's own gestures out of the game.
+ * ------------------------------------------------------------------------- */
+
+.is-phone-baking .answer-area {
+    left: 50%;
+    /* under the back-to-home button, which keeps the top left corner */
+    top: var(--back-home-room, 60px);
+    width: auto;
+    align-items: center;
+    transform: translateX(-50%);
+}
+
+.is-phone-baking .answer-label {
+    font-size: clamp(12px, 3.6vw, 18px);
+    text-align: center;
+}
+
+.is-phone-baking .quiz-card-area {
+    /* the script puts the board in the room which is left under the recipe */
+    left: 50%;
+    max-width: none;
+    transform: translate(-50%, -50%);
+    touch-action: none;
+}
+
+.is-phone-baking .card {
+    /* a tap turns a card over, nothing else */
+    touch-action: manipulation;
+}
+
+.is-phone-baking .score-area {
+    right: min(4vw, 4vh);
+    top: min(2.4vw, 2.4vh);
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.5em;
+}
+
+.is-phone-baking .score-label {
+    font-size: clamp(11px, 3.4vw, 16px);
+}
+
+.is-phone-baking .score-value {
+    font-size: clamp(14px, 4.4vw, 22px);
+}
+
+.is-phone-baking .submit-area {
+    right: min(4vw, 4vh);
+    bottom: min(3vw, 3vh);
+}
+
+.is-phone-baking .preview {
+    font-size: clamp(11px, 3.6vw, 17px);
+}
+
+.is-phone-baking .submit-button {
+    font-size: clamp(15px, 4.6vw, 22px);
+    touch-action: manipulation;
+}
+
+.is-phone-baking .miss-raspberry-cute {
+    /* every corner is taken on a phone, and the mascot would sit on the board */
+    display: none;
 }
 
 </style>

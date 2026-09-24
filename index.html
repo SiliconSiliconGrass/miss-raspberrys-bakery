@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8">
     <link rel="icon" href="/favicon.ico">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--
+      The games are full screen boards: a pinch or a double tap must not zoom
+      them away from their layout. `touch-action` in the games covers what this
+      one does not, which is the part iOS pays no attention to.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Vite App</title>
   </head>
   <body>

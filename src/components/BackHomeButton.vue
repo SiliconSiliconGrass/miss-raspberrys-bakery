@@ -7,8 +7,8 @@ import { useRouter } from 'vue-router'
  *
  * The room it takes is published as `--back-home-height` / `--back-home-room`,
  * so that whatever else lives in that corner keeps clear of it: the target
- * recipe of the baking game, the piece bar of the cargo game. The cargo game
- * reads the same numbers from its own script (see `BACK_HOME_*` there).
+ * recipe of the baking game, the piece bar of the cargo game. Layouts which
+ * have to know the number in px read it from `getBackHomeRoom()`.
  */
 const router = useRouter()
 
@@ -44,6 +44,8 @@ function backHome() {
     border-radius: 999px;
     box-shadow: 0 2px 6px rgba(60, 30, 0, 0.35);
     cursor: pointer;
+    /* a tap is a tap: no double tap zoom on a phone */
+    touch-action: manipulation;
     /* above the board and everything the player drags around it */
     z-index: 1000;
 }

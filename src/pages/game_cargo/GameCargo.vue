@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { GameAutomationBridge, GameAutomationPanel } from '../../automation';
 import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
+import { getBackHomeRoom, isPhoneScreen, setPhoneLayoutFlag } from '../../utils/layout';
 
 import type GameState from './GameState';
 import type Piece from './Piece';
@@ -64,15 +65,22 @@ const AUTOMATION_PANEL_WIDTH = 220
 const AUTOMATION_PANEL_WIDTH_RATIO = 0.2
 const AUTOMATION_PANEL_INSET_RATIO = 0.05
 /**
- * Room the back-to-home button takes at the top left corner: its height (a ratio
- * of the viewport height, clamped) plus the gap kept under it, in px. Keep all of
- * them in sync with `--back-home-height` / `--back-home-gap` in `BackHomeButton`.
+ * Phone layout: the piece bar runs across the top of the screen and takes this
+ * share of its height, clamped to the range below, in px.
  */
-const BACK_HOME_HEIGHT_RATIO = 0.056
-const BACK_HOME_MIN_HEIGHT = 36
-const BACK_HOME_MAX_HEIGHT = 56
-const BACK_HOME_GAP_RATIO = 0.016
-const BACK_HOME_MIN_GAP = 10
+const PHONE_BAR_HEIGHT_RATIO = 0.2
+const PHONE_MIN_BAR_HEIGHT = 96
+const PHONE_MAX_BAR_HEIGHT = 200
+/**
+ * Phone layout: the rotate button in the bottom left corner is a quarter disc of
+ * this radius, as a share of the screen width and clamped to the range below, in
+ * px. Keep in sync with `--rotate-radius` of `.rotate-button` in the style.
+ */
+const PHONE_ROTATE_RADIUS_RATIO = 0.34
+const PHONE_MIN_ROTATE_RADIUS = 96
+const PHONE_MAX_ROTATE_RADIUS = 170
+/** Phone layout: free space kept around the whole layout, as a ratio of the shortest edge. */
+const PHONE_MARGIN_RATIO = 0.03
 /** How long one half of the submit transition takes, in ms: submitting waits twice that. */
 const FADE_DURATION = 1000
 /** The shortest time between two submissions, in ms. */
@@ -201,6 +209,19 @@ const pieceBar = ref<HTMLDivElement | null>(null)
 const pieceBarHint = ref<HTMLDivElement | null>(null)
 const pieceBarList = ref<HTMLDivElement | null>(null)
 const dragLayer = ref<HTMLDivElement | null>(null)
+const submitArea = ref<HTMLDivElement | null>(null)
+const rotateButton = ref<HTMLButtonElement | null>(null)
+
+/** True while the screen is laid out the phone way: a portrait screen. */
+const isPhone = ref(isPhoneScreen())
+// already marked on the way in, so that the first frame is not drawn in the wrong shape
+setPhoneLayoutFlag('cargo', isPhone.value)
+/**
+ * True while the rotate button of the phone layout is out, which it is while a
+ * piece is selected or being dragged: a phone has no keyboard, so that button
+ * is the only way to turn a piece.
+ */
+const isRotateButtonOut = ref(false)
 
 
 function clamp(value: number, min: number, max: number) {
@@ -262,6 +283,7 @@ function initRandomQuiz() {
     pieceLayer.value?.replaceChildren()
     dragLayer.value?.replaceChildren()
     pieceBarList.value?.replaceChildren()
+    refreshRotateButton()
 
     pieceViews = game.pieces.map((piece, ind) => createPieceView(piece, ind))
     buildBoardCells()
@@ -310,9 +332,9 @@ function createPieceView(piece: Piece, ind: number): PieceView {
         cellEl.appendChild(icon)
         body.appendChild(cellEl)
 
-        // the mouse listens on the blocks themselves: the empty room inside the bounding box
+        // the pointer listens on the blocks themselves: the empty room inside the bounding box
         // of a piece must never swallow a click which belongs to a neighboring piece
-        cellEl.addEventListener('mousedown', (event) => onPieceMouseDown(ind, event))
+        cellEl.addEventListener('pointerdown', (event) => onPiecePointerDown(ind, event))
 
         return {el: cellEl, icon, x: cell.x, y: cell.y, merged}
     })
@@ -342,7 +364,7 @@ function createPieceView(piece: Piece, ind: number): PieceView {
         }
     }
     for (const bridge of bridges) {
-        bridge.el.addEventListener('mousedown', (event) => onPieceMouseDown(ind, event))
+        bridge.el.addEventListener('pointerdown', (event) => onPiecePointerDown(ind, event))
     }
 
     const slot = document.createElement('div')
@@ -476,9 +498,108 @@ function buildPieceBar() {
 // layout
 // ---------------------------------------------------------------------------
 
+/** The room the board and the labels around it take at the current `blockSize`. */
+interface BoardMetrics {
+    labelIconSize: number
+    labelIconGap: number
+    labelPadding: number
+    labelThickness: number
+    boardWidth: number
+    boardHeight: number
+    areaInset: number
+    areaWidth: number
+    areaHeight: number
+}
+
+
+/** Measure the board and its labels for the `blockSize` of the current layout. */
+function getBoardMetrics(): BoardMetrics {
+    if (!game) {
+        return {
+            labelIconSize: 0,
+            labelIconGap: 0,
+            labelPadding: 0,
+            labelThickness: 0,
+            boardWidth: 0,
+            boardHeight: 0,
+            areaInset: 0,
+            areaWidth: 0,
+            areaHeight: 0,
+        }
+    }
+
+    const labelIconSize = Math.round(blockSize * LABEL_ICON_RATIO)
+    const labelIconGap = Math.round(blockSize * LABEL_ICON_GAP_RATIO)
+    const labelPadding = Math.round(blockSize * LABEL_PADDING_RATIO)
+    const labelThickness = labelPadding * 2
+        + game.numTypes * labelIconSize
+        + (game.numTypes - 1) * labelIconGap
+    const boardWidth = game.numCols * blockSize + (game.numCols - 1) * CELL_GAP
+    const boardHeight = game.numRows * blockSize + (game.numRows - 1) * CELL_GAP
+    const areaInset = labelThickness + Math.round(blockSize * LABEL_EDGE_RATIO)
+
+    return {
+        labelIconSize,
+        labelIconGap,
+        labelPadding,
+        labelThickness,
+        boardWidth,
+        boardHeight,
+        areaInset,
+        areaWidth: areaInset + boardWidth,
+        areaHeight: areaInset + boardHeight,
+    }
+}
+
+
+/**
+ * Put the board and its labels where the layout decided they go. (`left`, `top`)
+ * is the corner of the whole area: the blocks start one inset further right and
+ * further down, because the labels sit in that inset.
+ */
+function applyBoardLayout(left: number, top: number, metrics: BoardMetrics) {
+    if (!game || !boardArea.value || !gridArea.value || !rowLabelStrip.value || !colLabelStrip.value) {
+        return
+    }
+
+    boardArea.value.style.left = `${left}px`
+    boardArea.value.style.top = `${top}px`
+    boardArea.value.style.width = `${metrics.areaWidth}px`
+    boardArea.value.style.height = `${metrics.areaHeight}px`
+    boardArea.value.style.setProperty('--block-size', `${blockSize}px`)
+    boardArea.value.style.setProperty('--label-icon-size', `${metrics.labelIconSize}px`)
+    boardArea.value.style.setProperty('--label-icon-gap', `${metrics.labelIconGap}px`)
+    boardArea.value.style.setProperty('--label-padding', `${metrics.labelPadding}px`)
+
+    // the constraint labels mirror the rows and the columns of the board
+    rowLabelStrip.value.style.left = '0px'
+    rowLabelStrip.value.style.top = `${metrics.areaInset}px`
+    rowLabelStrip.value.style.width = `${metrics.labelThickness}px`
+    rowLabelStrip.value.style.height = `${metrics.boardHeight}px`
+    rowLabelStrip.value.style.gridTemplateRows = `repeat(${game.numRows}, ${blockSize}px)`
+    rowLabelStrip.value.style.rowGap = `${CELL_GAP}px`
+
+    colLabelStrip.value.style.left = `${metrics.areaInset}px`
+    colLabelStrip.value.style.top = '0px'
+    colLabelStrip.value.style.width = `${metrics.boardWidth}px`
+    colLabelStrip.value.style.height = `${metrics.labelThickness}px`
+    colLabelStrip.value.style.gridTemplateColumns = `repeat(${game.numCols}, ${blockSize}px)`
+    colLabelStrip.value.style.columnGap = `${CELL_GAP}px`
+
+    gridArea.value.style.left = `${metrics.areaInset}px`
+    gridArea.value.style.top = `${metrics.areaInset}px`
+    gridArea.value.style.width = `${metrics.boardWidth}px`
+    gridArea.value.style.height = `${metrics.boardHeight}px`
+    gridArea.value.style.gridTemplateColumns = `repeat(${game.numCols}, ${blockSize}px)`
+    gridArea.value.style.gridAutoRows = `${blockSize}px`
+    gridArea.value.style.gap = `${CELL_GAP}px`
+}
+
+
 /**
  * Size the board and the piece bar so that both of them fit on the screen,
- * with a margin on every side and without overlapping each other.
+ * with a margin on every side and without overlapping each other. A portrait
+ * screen gets the phone layout, every other screen the wide one.
  */
 function fitLayout() {
     if (!game || !boardArea.value || !gridArea.value || !pieceBar.value
@@ -488,6 +609,27 @@ function fitLayout() {
 
     const viewWidth = window.innerWidth
     const viewHeight = window.innerHeight
+    const nextIsPhone = isPhoneScreen(viewWidth, viewHeight)
+    isPhone.value = nextIsPhone
+    setPhoneLayoutFlag('cargo', nextIsPhone)
+
+    if (nextIsPhone) {
+        fitPhoneLayout(viewWidth, viewHeight)
+    } else {
+        fitWideLayout(viewWidth, viewHeight)
+    }
+}
+
+
+/**
+ * The wide layout: the piece bar against the left edge of the screen, the board
+ * centered in the room which is left of it, everything else in the corners.
+ */
+function fitWideLayout(viewWidth: number, viewHeight: number) {
+    if (!game) {
+        return
+    }
+
     const margin = Math.round(clamp(Math.min(viewWidth, viewHeight) * SCREEN_MARGIN_RATIO, 12, 48))
     const barWidth = Math.round(clamp(viewWidth * PIECE_BAR_WIDTH_RATIO, MIN_PIECE_BAR_WIDTH, MAX_PIECE_BAR_WIDTH))
     const barBoardGap = Math.max(margin, 16)
@@ -514,72 +656,33 @@ function fitLayout() {
     ) / 2) * 2, MIN_BLOCK_SIZE, MAX_BLOCK_SIZE)
     cellPitch = blockSize + CELL_GAP
 
-    const labelIconSize = Math.round(blockSize * LABEL_ICON_RATIO)
-    const labelIconGap = Math.round(blockSize * LABEL_ICON_GAP_RATIO)
-    const labelPadding = Math.round(blockSize * LABEL_PADDING_RATIO)
-    const labelEdge = Math.round(blockSize * LABEL_EDGE_RATIO)
-    const labelThickness = labelPadding * 2
-        + game.numTypes * labelIconSize
-        + (game.numTypes - 1) * labelIconGap
-    const boardWidth = game.numCols * blockSize + (game.numCols - 1) * CELL_GAP
-    const boardHeight = game.numRows * blockSize + (game.numRows - 1) * CELL_GAP
-    const areaInset = labelThickness + labelEdge
+    const metrics = getBoardMetrics()
 
     // the back-to-home button sits in the top left corner, right above the piece bar
-    const backHomeRoom = Math.round(
-        clamp(viewHeight * BACK_HOME_HEIGHT_RATIO, BACK_HOME_MIN_HEIGHT, BACK_HOME_MAX_HEIGHT)
-        + Math.max(BACK_HOME_MIN_GAP, Math.min(viewWidth, viewHeight) * BACK_HOME_GAP_RATIO),
-    )
+    const backHomeRoom = getBackHomeRoom(viewWidth, viewHeight)
 
     // the piece bar: as tall as what is left of the screen allows, against the left
     // edge of the screen and below the back-to-home button
-    pieceBar.value.style.left = `${margin}px`
-    pieceBar.value.style.top = `${margin + backHomeRoom}px`
-    pieceBar.value.style.width = `${barWidth}px`
-    pieceBar.value.style.height = `${viewHeight - margin * 2 - backHomeRoom}px`
+    pieceBar.value!.style.left = `${margin}px`
+    pieceBar.value!.style.top = `${margin + backHomeRoom}px`
+    pieceBar.value!.style.width = `${barWidth}px`
+    pieceBar.value!.style.height = `${viewHeight - margin * 2 - backHomeRoom}px`
 
     // the board area: centered in the space which is left of the piece bar
     const areaLeft = margin + barWidth + barBoardGap
-    const areaWidth = rightEdge - areaLeft
     // the blocks are centered in the window, not the whole board area: the labels on the
     // left of the board take room of their own, and centering the area would push the
     // blocks to the right by half of it
-    const centeredGridLeft = Math.round((viewWidth - boardWidth) / 2)
+    const centeredGridLeft = Math.round((viewWidth - metrics.boardWidth) / 2)
     const gridLeft = Math.max(
-        areaLeft + areaInset,
-        Math.min(centeredGridLeft, rightEdge - boardWidth),
+        areaLeft + metrics.areaInset,
+        Math.min(centeredGridLeft, rightEdge - metrics.boardWidth),
     )
-    boardArea.value.style.left = `${gridLeft - areaInset}px`
-    boardArea.value.style.top = `${Math.round((viewHeight - areaInset - boardHeight) / 2)}px`
-    boardArea.value.style.width = `${areaInset + boardWidth}px`
-    boardArea.value.style.height = `${areaInset + boardHeight}px`
-    boardArea.value.style.setProperty('--block-size', `${blockSize}px`)
-    boardArea.value.style.setProperty('--label-icon-size', `${labelIconSize}px`)
-    boardArea.value.style.setProperty('--label-icon-gap', `${labelIconGap}px`)
-    boardArea.value.style.setProperty('--label-padding', `${labelPadding}px`)
-
-    // the constraint labels mirror the rows and the columns of the board
-    rowLabelStrip.value.style.left = '0px'
-    rowLabelStrip.value.style.top = `${areaInset}px`
-    rowLabelStrip.value.style.width = `${labelThickness}px`
-    rowLabelStrip.value.style.height = `${boardHeight}px`
-    rowLabelStrip.value.style.gridTemplateRows = `repeat(${game.numRows}, ${blockSize}px)`
-    rowLabelStrip.value.style.rowGap = `${CELL_GAP}px`
-
-    colLabelStrip.value.style.left = `${areaInset}px`
-    colLabelStrip.value.style.top = '0px'
-    colLabelStrip.value.style.width = `${boardWidth}px`
-    colLabelStrip.value.style.height = `${labelThickness}px`
-    colLabelStrip.value.style.gridTemplateColumns = `repeat(${game.numCols}, ${blockSize}px)`
-    colLabelStrip.value.style.columnGap = `${CELL_GAP}px`
-
-    gridArea.value.style.left = `${areaInset}px`
-    gridArea.value.style.top = `${areaInset}px`
-    gridArea.value.style.width = `${boardWidth}px`
-    gridArea.value.style.height = `${boardHeight}px`
-    gridArea.value.style.gridTemplateColumns = `repeat(${game.numCols}, ${blockSize}px)`
-    gridArea.value.style.gridAutoRows = `${blockSize}px`
-    gridArea.value.style.gap = `${CELL_GAP}px`
+    applyBoardLayout(
+        gridLeft - metrics.areaInset,
+        Math.round((viewHeight - metrics.areaHeight) / 2),
+        metrics,
+    )
 
     // the piece bar draws its pieces with their own, smaller block size: scaling a piece
     // down instead would put every edge of it between two pixels, and blur it
@@ -588,6 +691,78 @@ function fitLayout() {
     // the scrollbar of the list takes room of its own, which is kept free on both cases
     const barRoom = barWidth - barPadding * 2 - PIECE_BAR_SCROLLBAR_WIDTH
     slotSize = Math.floor(barRoom / 2) * 2
+    fitPieceBarBlocks()
+    layoutPieceBar()
+}
+
+
+/**
+ * The phone layout: a portrait screen has no room beside the board, so the piece
+ * bar runs across the top of the screen and the board sits under it.
+ *
+ * The corners do not move: the back-to-home button stays in the top left, the
+ * score in the top right, the submit area in the bottom right. The bottom left
+ * corner belongs to the rotate button, which is as tall as it is wide, so the
+ * board keeps that much room free above it and never ends up underneath it.
+ */
+function fitPhoneLayout(viewWidth: number, viewHeight: number) {
+    if (!game) {
+        return
+    }
+
+    const margin = Math.round(clamp(Math.min(viewWidth, viewHeight) * PHONE_MARGIN_RATIO, 8, 20))
+    const gap = Math.max(8, margin)
+    const backHomeRoom = getBackHomeRoom(viewWidth, viewHeight)
+    const barHeight = Math.round(clamp(
+        viewHeight * PHONE_BAR_HEIGHT_RATIO,
+        PHONE_MIN_BAR_HEIGHT,
+        PHONE_MAX_BAR_HEIGHT,
+    ))
+    // keep this in sync with `--rotate-radius` of `.rotate-button` in the style
+    const rotateRadius = Math.round(clamp(
+        viewWidth * PHONE_ROTATE_RADIUS_RATIO,
+        PHONE_MIN_ROTATE_RADIUS,
+        PHONE_MAX_ROTATE_RADIUS,
+    ))
+
+    // the piece bar: across the top of the screen, under the corner buttons
+    pieceBar.value!.style.left = `${margin}px`
+    pieceBar.value!.style.top = `${backHomeRoom}px`
+    pieceBar.value!.style.width = `${viewWidth - margin * 2}px`
+    pieceBar.value!.style.height = `${barHeight}px`
+
+    // the bottom of the screen belongs to the submit area on the right and to the
+    // rotate button on the left: the board stays above both of them
+    const submitRoom = (submitArea.value?.offsetHeight ?? 0) + margin
+    const bottomRoom = Math.max(submitRoom, rotateRadius + margin)
+    const bandTop = backHomeRoom + barHeight + gap
+    const bandHeight = Math.max(80, viewHeight - bottomRoom - bandTop)
+
+    const labelRatio = getLabelThicknessRatio(game.numTypes) + LABEL_EDGE_RATIO
+    blockSize = clamp(Math.floor(Math.min(
+        (viewWidth - margin * 2 - (game.numCols - 1) * CELL_GAP) / (game.numCols + labelRatio),
+        (bandHeight - (game.numRows - 1) * CELL_GAP) / (game.numRows + labelRatio),
+    ) / 2) * 2, MIN_BLOCK_SIZE, MAX_BLOCK_SIZE)
+    cellPitch = blockSize + CELL_GAP
+
+    const metrics = getBoardMetrics()
+    const gridLeft = clamp(
+        Math.round((viewWidth - metrics.boardWidth) / 2),
+        margin + metrics.areaInset,
+        Math.max(margin + metrics.areaInset, viewWidth - margin - metrics.boardWidth),
+    )
+    applyBoardLayout(
+        gridLeft - metrics.areaInset,
+        Math.round(bandTop + (bandHeight - metrics.areaHeight) / 2),
+        metrics,
+    )
+
+    // the pieces of the bar are drawn with a block size of their own, as big as the
+    // bar is thick: the row scrolls sideways, so its width does not limit them
+    barPadding = Math.max(6, Math.round(barHeight * 0.06))
+    slotGap = Math.max(6, Math.round(barHeight * 0.05))
+    const barRoom = pieceBarList.value!.clientHeight - barPadding * 2 - PIECE_BAR_SCROLLBAR_WIDTH
+    slotSize = Math.max(16, Math.floor(barRoom / 2) * 2)
     fitPieceBarBlocks()
     layoutPieceBar()
 }
@@ -636,30 +811,20 @@ function getSlotBox(view: PieceView) {
 
 
 /**
- * Stack the slots of the piece bar and put every piece into its own slot. The
- * slots are centered by hand, with whole pixels: centering them with css can put
- * them between two pixels, which would draw the pieces of the bar blurry.
+ * Stack the slots of the piece bar and put every piece into its own slot, in the
+ * shape the current layout gives the bar. The slots are centered by hand, with
+ * whole pixels: centering them with css can put them between two pixels, which
+ * would draw the pieces of the bar blurry.
  */
 function layoutPieceBar() {
     if (!pieceBarList.value) {
         return
     }
-    const slotBoxes = pieceViews.map(view => getSlotBox(view))
-    const columnWidth = slotBoxes.reduce((widest, box) => Math.max(widest, box.width), 0)
-    const rowsHeight = slotBoxes.reduce((height, box) => height + box.height, 0)
-        + Math.max(0, slotBoxes.length - 1) * slotGap
-    const rowPadding = barPadding + Math.max(
-        0,
-        Math.floor((pieceBarList.value.clientHeight - rowsHeight - barPadding * 2) / 2),
-    )
-    const columnPadding = barPadding + Math.max(
-        0,
-        Math.floor((pieceBarList.value.clientWidth - barPadding * 2 - columnWidth) / 2),
-    )
-
-    pieceBarList.value.style.gridTemplateColumns = `${columnWidth}px`
-    pieceBarList.value.style.gap = `${slotGap}px`
-    pieceBarList.value.style.padding = `${rowPadding}px ${columnPadding}px ${barPadding}px`
+    if (isPhone.value) {
+        layoutPhonePieceBar()
+    } else {
+        layoutWidePieceBar()
+    }
 
     for (const view of pieceViews) {
         const slotBox = getSlotBox(view)
@@ -667,6 +832,58 @@ function layoutPieceBar() {
         view.slot.style.height = `${slotBox.height}px`
         applyPieceStyle(view)
     }
+}
+
+
+/** One column of slots, against the left edge of the screen. */
+function layoutWidePieceBar() {
+    const list = pieceBarList.value!
+    const slotBoxes = pieceViews.map(view => getSlotBox(view))
+    const columnWidth = slotBoxes.reduce((widest, box) => Math.max(widest, box.width), 0)
+    const rowsHeight = slotBoxes.reduce((height, box) => height + box.height, 0)
+        + Math.max(0, slotBoxes.length - 1) * slotGap
+    const rowPadding = barPadding + Math.max(
+        0,
+        Math.floor((list.clientHeight - rowsHeight - barPadding * 2) / 2),
+    )
+    const columnPadding = barPadding + Math.max(
+        0,
+        Math.floor((list.clientWidth - barPadding * 2 - columnWidth) / 2),
+    )
+
+    list.style.gridTemplateRows = ''
+    list.style.gridTemplateColumns = `${columnWidth}px`
+    list.style.gridAutoFlow = ''
+    list.style.gap = `${slotGap}px`
+    list.style.padding = `${rowPadding}px ${columnPadding}px ${barPadding}px`
+}
+
+
+/**
+ * One row of slots, across the top of the screen and scrolling sideways: a phone
+ * is too narrow to keep the tray beside the board, and there are too many pieces
+ * to fit them all on one screen.
+ */
+function layoutPhonePieceBar() {
+    const list = pieceBarList.value!
+    const slotBoxes = pieceViews.map(view => getSlotBox(view))
+    const rowHeight = slotBoxes.reduce((tallest, box) => Math.max(tallest, box.height), 0)
+    const columnsWidth = slotBoxes.reduce((width, box) => width + box.width, 0)
+        + Math.max(0, slotBoxes.length - 1) * slotGap
+    const columnPadding = barPadding + Math.max(
+        0,
+        Math.floor((list.clientWidth - columnsWidth - barPadding * 2) / 2),
+    )
+    const rowPadding = barPadding + Math.max(
+        0,
+        Math.floor((list.clientHeight - rowHeight - barPadding * 2) / 2),
+    )
+
+    list.style.gridTemplateColumns = ''
+    list.style.gridTemplateRows = `${rowHeight}px`
+    list.style.gridAutoFlow = 'column'
+    list.style.gap = `${slotGap}px`
+    list.style.padding = `${rowPadding}px ${columnPadding}px ${rowPadding}px ${barPadding}px`
 }
 
 
@@ -741,6 +958,9 @@ function applyPieceStyle(view: PieceView) {
 
 function attachToBar(view: PieceView) {
     view.host = 'bar'
+    // the phone stylesheet scrolls the tray sideways under a piece, but takes a
+    // piece out of it: the two are told apart by this class
+    view.el.classList.add('is-in-bar')
     view.slot.appendChild(view.el)
     view.slot.classList.add('is-occupied')
 }
@@ -751,6 +971,7 @@ function attachToBoard(view: PieceView) {
         return
     }
     view.host = 'board'
+    view.el.classList.remove('is-in-bar')
     pieceLayer.value.appendChild(view.el)
     view.slot.classList.remove('is-occupied')
 }
@@ -761,6 +982,7 @@ function attachToDragLayer(view: PieceView) {
         return
     }
     view.host = 'drag'
+    view.el.classList.remove('is-in-bar')
     dragLayer.value.appendChild(view.el)
     view.slot.classList.remove('is-occupied')
 }
@@ -869,13 +1091,35 @@ function refreshPieceClasses(view: PieceView) {
 
 
 function select(ind: number | null) {
-    if (selectedInd === ind) {
+    if (selectedInd !== ind) {
+        selectedInd = ind
+        for (const view of pieceViews) {
+            refreshPieceClasses(view)
+        }
+    }
+    refreshRotateButton()
+}
+
+
+/**
+ * The rotate button of the phone layout grows out of the bottom left corner
+ * while a piece is selected or being dragged, and folds back when none is.
+ */
+function refreshRotateButton() {
+    isRotateButtonOut.value = isPhone.value && (selectedInd !== null || drag !== null)
+}
+
+
+/**
+ * The phone's stand-in for the R key: turn the piece the player is holding, or
+ * the one that is selected, by a quarter turn.
+ */
+function rotateSelectedPiece() {
+    const ind = drag ? drag.ind : selectedInd
+    if (ind === null || isSubmitting.value) {
         return
     }
-    selectedInd = ind
-    for (const view of pieceViews) {
-        refreshPieceClasses(view)
-    }
+    rotatePiece(ind)
 }
 
 
@@ -923,11 +1167,13 @@ function checkStability(view: PieceView) {
 // dragging
 // ---------------------------------------------------------------------------
 
-function onPieceMouseDown(ind: number, event: MouseEvent) {
+function onPiecePointerDown(ind: number, event: PointerEvent) {
     // the board is not the player's while it fades away and the next quiz is prepared
     if (event.button !== 0 || !game || isSubmitting.value) {
         return
     }
+    // the piece belongs to the finger from here on: `touch-action` on the piece
+    // keeps the browser's own gestures out of the way
     event.preventDefault()
 
     // touching a piece settles the board: the other unstable pieces fly back to the piece bar
@@ -936,8 +1182,9 @@ function onPieceMouseDown(ind: number, event: MouseEvent) {
     refreshPreview()
 
     press = {ind, startX: event.clientX, startY: event.clientY}
-    window.addEventListener('mousemove', onWindowMouseMove)
-    window.addEventListener('mouseup', onWindowMouseUp)
+    window.addEventListener('pointermove', onWindowPointerMove)
+    window.addEventListener('pointerup', onWindowPointerUp)
+    window.addEventListener('pointercancel', onWindowPointerUp)
 }
 
 
@@ -947,7 +1194,7 @@ function onPieceMouseDown(ind: number, event: MouseEvent) {
  * selection. The listener sits on the window because the empty room is not one
  * element: it is everything which is not a block of a piece.
  */
-function onEmptyRoomMouseDown(event: MouseEvent) {
+function onEmptyRoomPointerDown(event: PointerEvent) {
     if (isSubmitting.value) {
         return
     }
@@ -958,7 +1205,7 @@ function onEmptyRoomMouseDown(event: MouseEvent) {
 }
 
 
-function onWindowMouseMove(event: MouseEvent) {
+function onWindowPointerMove(event: PointerEvent) {
     if (press) {
         const distance = Math.hypot(event.clientX - press.startX, event.clientY - press.startY)
         if (distance >= DRAG_THRESHOLD) {
@@ -972,9 +1219,11 @@ function onWindowMouseMove(event: MouseEvent) {
 }
 
 
-function onWindowMouseUp() {
-    window.removeEventListener('mousemove', onWindowMouseMove)
-    window.removeEventListener('mouseup', onWindowMouseUp)
+/** The pointer was lifted, or the browser took the gesture over for itself. */
+function onWindowPointerUp() {
+    window.removeEventListener('pointermove', onWindowPointerMove)
+    window.removeEventListener('pointerup', onWindowPointerUp)
+    window.removeEventListener('pointercancel', onWindowPointerUp)
     press = null
     document.body.style.cursor = ''
 
@@ -988,7 +1237,7 @@ function onWindowMouseUp() {
 }
 
 
-function beginDrag(ind: number, event: MouseEvent) {
+function beginDrag(ind: number, event: PointerEvent) {
     const view = pieceViews[ind]!
     const piece = view.piece
     const firstRect = view.el.getBoundingClientRect()
@@ -1025,6 +1274,7 @@ function beginDrag(ind: number, event: MouseEvent) {
     attachToDragLayer(view)
     updateDrag(event.clientX, event.clientY)
     animateFromRect(view.el, firstRect, PICK_DURATION)
+    refreshRotateButton()
 }
 
 
@@ -1127,7 +1377,7 @@ function sendPiecesToBar(views: PieceView[]) {
     }
     layoutPieceBar()
     // at least the first of them has to be on screen for its flight to be seen
-    flying[0]!.view.slot.scrollIntoView({block: 'nearest'})
+    flying[0]!.view.slot.scrollIntoView({block: 'nearest', inline: 'nearest'})
 
     let droppedSelection = false
     for (const {view, firstRect} of flying) {
@@ -1138,10 +1388,7 @@ function sendPiecesToBar(views: PieceView[]) {
         }
     }
     if (droppedSelection) {
-        selectedInd = null
-        for (const view of pieceViews) {
-            refreshPieceClasses(view)
-        }
+        select(null)
     }
 }
 
@@ -1391,8 +1638,9 @@ function cancelPress() {
     if (!press && !drag) {
         return
     }
-    window.removeEventListener('mousemove', onWindowMouseMove)
-    window.removeEventListener('mouseup', onWindowMouseUp)
+    window.removeEventListener('pointermove', onWindowPointerMove)
+    window.removeEventListener('pointerup', onWindowPointerUp)
+    window.removeEventListener('pointercancel', onWindowPointerUp)
     if (drag) {
         // an interrupted drag puts the piece back into the piece bar
         const view = pieceViews[drag.ind]
@@ -1405,6 +1653,7 @@ function cancelPress() {
     clearDropPreview()
     document.body.style.cursor = ''
     refreshPreview()
+    refreshRotateButton()
 }
 
 
@@ -1712,9 +1961,11 @@ onMounted(() => {
     startNextQuiz()
     window.addEventListener('resize', fitLayout)
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mousedown', onEmptyRoomMouseDown)
-    // releasing the mouse outside of the window does not reach the page: drop the piece instead
-    window.addEventListener('blur', onWindowMouseUp)
+    window.addEventListener('pointerdown', onEmptyRoomPointerDown)
+    // a pointer which is released outside of the window never reaches the page, and a
+    // gesture the browser takes over for itself (a swipe of the piece bar) ends with a
+    // pointercancel instead of a pointerup: both have to drop the piece
+    window.addEventListener('blur', onWindowPointerUp)
     // NOTE: no connect() here on purpose. The browser only asks for permission
     // to reach the local network while the page has user activation, so the
     // dial has to happen inside the click on the panel's 连接 button.
@@ -1724,10 +1975,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
     window.removeEventListener('resize', fitLayout)
     window.removeEventListener('keydown', onKeyDown)
-    window.removeEventListener('mousedown', onEmptyRoomMouseDown)
-    window.removeEventListener('blur', onWindowMouseUp)
-    window.removeEventListener('mousemove', onWindowMouseMove)
-    window.removeEventListener('mouseup', onWindowMouseUp)
+    window.removeEventListener('pointerdown', onEmptyRoomPointerDown)
+    window.removeEventListener('blur', onWindowPointerUp)
+    window.removeEventListener('pointermove', onWindowPointerMove)
+    window.removeEventListener('pointerup', onWindowPointerUp)
+    window.removeEventListener('pointercancel', onWindowPointerUp)
+    setPhoneLayoutFlag('cargo', false)
     clearFadeTimers()
     automationBridge.dispose()
     document.body.style.cursor = ''
@@ -1744,7 +1997,9 @@ onBeforeUnmount(() => {
         </div>
     </div>
     <div ref="pieceBar" class="piece-bar" :class="fadeClass">
-        <div ref="pieceBarHint" class="piece-bar-hint">鼠标拖拽、R键旋转</div>
+        <div ref="pieceBarHint" class="piece-bar-hint">
+            {{ isPhone ? '拖动拼图装箱，点左下角旋转' : '鼠标拖拽、R键旋转' }}
+        </div>
         <div ref="pieceBarList" class="piece-bar-list"></div>
     </div>
     <div ref="dragLayer" class="drag-layer"></div>
@@ -1752,7 +2007,7 @@ onBeforeUnmount(() => {
         <div class="score-label">总得分</div>
         <div class="score-value">{{ totalScoreText }}</div>
     </div>
-    <div class="submit-area">
+    <div ref="submitArea" class="submit-area">
         <div class="demand-preview" :class="{ 'is-demand-met': isDemandMet }">
             <div class="preview-row">
                 <span class="preview-label">需求满足度</span>
@@ -1765,8 +2020,23 @@ onBeforeUnmount(() => {
         </div>
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
+    <!--
+        A phone has no keyboard, so the R key becomes a button: a quarter disc with
+        its center in the bottom left corner of the screen, which grows out of that
+        corner while a piece is selected or dragged and folds back when none is.
+    -->
+    <button
+        v-if="isPhone"
+        ref="rotateButton"
+        class="rotate-button"
+        :class="{ 'is-out': isRotateButtonOut }"
+        type="button"
+        @pointerdown.stop
+        @click="rotateSelectedPiece"
+    >旋转</button>
     <BackHomeButton />
-    <GameAutomationPanel :bridge="automationBridge" />
+    <!-- a phone plays with a finger: nothing to connect a player program to -->
+    <GameAutomationPanel v-if="!isPhone" :bridge="automationBridge" />
     <audio :src="BGM_SRC" autoplay loop></audio>
 </template>
 
@@ -2164,5 +2434,117 @@ html {
     opacity: 0.55;
     box-shadow: none;
     cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+ * the phone layout
+ *
+ * A portrait screen is too narrow for the piece bar to stand beside the board,
+ * so the bar runs across the top and the board sits under it. The script places
+ * the two; these rules give them the shape they need there and keep the
+ * browser's own gestures (scrolling, zooming, bouncing) out of the game.
+ * ------------------------------------------------------------------------- */
+
+.is-phone-cargo .piece-bar-list {
+    /* one row of slots which scrolls sideways, instead of one column */
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-gutter: auto;
+    /* a sideways swipe scrolls the tray ... */
+    touch-action: pan-x;
+}
+
+.is-phone-cargo .piece.is-in-bar,
+.is-phone-cargo .piece.is-in-bar .piece-cell,
+.is-phone-cargo .piece.is-in-bar .piece-bridge {
+    /* ... and it still scrolls it when the swipe starts on a piece, so that the
+       tray stays reachable; a drag out of the tray is downward, which pan-x
+       leaves to the game */
+    touch-action: pan-x;
+}
+
+.is-phone-cargo .board-area,
+.is-phone-cargo .grid-area,
+.is-phone-cargo .board-cell,
+.is-phone-cargo .piece:not(.is-in-bar),
+.is-phone-cargo .piece:not(.is-in-bar) .piece-cell,
+.is-phone-cargo .piece:not(.is-in-bar) .piece-bridge {
+    /* a piece on the board follows the finger in every direction */
+    touch-action: none;
+}
+
+.is-phone-cargo .piece-bar-hint {
+    padding: min(1.2vh, 12px) 8px min(0.6vh, 8px);
+    font-size: clamp(11px, 3.4vw, 16px);
+}
+
+.is-phone-cargo .score-area {
+    right: min(4vw, 4vh);
+    top: min(2.4vw, 2.4vh);
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.5em;
+}
+
+.is-phone-cargo .score-label {
+    font-size: clamp(11px, 3.4vw, 16px);
+}
+
+.is-phone-cargo .score-value {
+    font-size: clamp(14px, 4.4vw, 22px);
+}
+
+.is-phone-cargo .submit-area {
+    right: min(4vw, 4vh);
+    bottom: min(3vw, 3vh);
+}
+
+.is-phone-cargo .demand-preview {
+    font-size: clamp(11px, 3.6vw, 17px);
+}
+
+.is-phone-cargo .submit-button {
+    font-size: clamp(15px, 4.6vw, 22px);
+    touch-action: manipulation;
+}
+
+/* --- the rotate button, the phone's stand-in for the R key --- */
+
+.is-phone-cargo .rotate-button {
+    /* keep this in sync with PHONE_ROTATE_RADIUS_* in the script */
+    --rotate-radius: clamp(96px, 34vw, 170px);
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    width: var(--rotate-radius);
+    height: var(--rotate-radius);
+    /* a quarter disc, with its center in the corner of the screen it grows from */
+    border-radius: 0 100% 0 0;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* the label sits out on the round side of the disc, not in the corner */
+    padding: 0 0 26% 26%;
+    font-family: 'Ruantang', sans-serif;
+    font-size: clamp(15px, 4.6vw, 24px);
+    color: #7c3200;
+    background-color: rgba(255, 246, 224, 0.92);
+    box-shadow: 2px -2px 14px rgba(60, 30, 0, 0.35);
+    /* it grows out of the corner, and folds back into it */
+    transform-origin: 0% 100%;
+    transform: scale(0);
+    transition: transform 200ms cubic-bezier(0.2, 1.3, 0.4, 1);
+    pointer-events: none;
+    touch-action: manipulation;
+    cursor: pointer;
+    z-index: 1000;
+}
+
+.is-phone-cargo .rotate-button.is-out {
+    transform: scale(1);
+    pointer-events: auto;
 }
 </style>
