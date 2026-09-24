@@ -83,7 +83,17 @@ export interface GameAutomationBridgeOptions {
     debug?: boolean
 }
 
-export type AutomationConnectionStatus = 'disconnected' | 'connecting' | 'connected'
+/**
+ * `idle` means the player never asked for a connection yet: the games do not
+ * dial in on load, see `GameAutomationPanel` for the reason.
+ */
+export type AutomationConnectionStatus = 'idle' | 'disconnected' | 'connecting' | 'connected'
+
+/**
+ * What the browser says about this page reaching the local network. `unknown`
+ * covers the browsers which have no such gate, or do not expose it.
+ */
+export type AutomationLocalNetworkAccessState = 'granted' | 'prompt' | 'denied' | 'unknown'
 
 export interface GameAutomationBridgeState {
     /** Port currently dialed, the only thing the player has to configure. */
@@ -97,6 +107,14 @@ export interface GameAutomationBridgeState {
     attemptCount: number
     /** Last connection / protocol error, empty while everything is fine. */
     lastError: string
+    /**
+     * True once the browser refused a request to the local network: every
+     * further attempt is denied without a prompt, so retrying is pointless
+     * until the player changes the permission in the site settings.
+     */
+    blockedByBrowser: boolean
+    /** Current state of the local network access permission. */
+    permissionState: AutomationLocalNetworkAccessState
     /** Actions waiting in the buffer. */
     pendingActions: number
     /** Actions executed since the bridge was created. */
@@ -172,16 +190,21 @@ export default class GameAutomationBridge<
         const port = this.loadPort() ?? AUTOMATION_DEFAULT_PORT
         this.state = reactive<GameAutomationBridgeState>({
             port,
-            status: 'disconnected',
+            status: 'idle',
             serverUrl: this.urlForPort(port),
             connectedAt: null,
             attemptCount: 0,
             lastError: '',
+            blockedByBrowser: false,
+            permissionState: 'unknown',
             pendingActions: 0,
             executedActions: 0,
             droppedActions: 0,
             lastSubmitAt: null,
         })
+
+        // only fills in the display before the player asks for a connection
+        void this.refreshPermissionState()
     }
 
     // ---------------------------------------------------------------- connection
@@ -212,8 +235,13 @@ export default class GameAutomationBridge<
         this.log(`connect requested, dialing ${this.state.serverUrl}`)
         this.wantConnection = true
         this.state.lastError = ''
+        this.state.blockedByBrowser = false
         this.clearRetryTimer()
+        // Dials synchronously: the browser only asks for the local network
+        // access permission while the page has user activation, so this has to
+        // stay inside the click that called us.
         this.openSocket()
+        void this.refreshPermissionState()
     }
 
     /** Stop dialing and close the current connection. */
@@ -223,8 +251,9 @@ export default class GameAutomationBridge<
         this.clearRetryTimer()
         this.dropPendingSubmit()
         this.closeSocket()
-        this.state.status = 'disconnected'
+        this.state.status = 'idle'
         this.state.connectedAt = null
+        this.state.blockedByBrowser = false
     }
 
     /** Manual retry: forget the failure count and dial again right now. */
@@ -277,6 +306,7 @@ export default class GameAutomationBridge<
             this.recordFailure(`timed out connecting to ${this.state.serverUrl}`)
             this.closeSocket()
             this.scheduleRetry()
+            void this.noteConnectionFailure()
         }, this.connectTimeoutMs)
     }
 
@@ -305,6 +335,9 @@ export default class GameAutomationBridge<
         this.state.connectedAt = Date.now()
         this.state.attemptCount = 0
         this.state.lastError = ''
+        // reaching the player program is the last word: whatever the permission
+        // query claims, this page clearly may talk to the local network
+        this.state.blockedByBrowser = false
 
         this.sendEvent('hello', {
             protocolVersion: AUTOMATION_PROTOCOL_VERSION,
@@ -382,6 +415,7 @@ export default class GameAutomationBridge<
                     : `cannot connect to ${this.state.serverUrl} (code ${event.code})`,
             )
             this.scheduleRetry()
+            void this.noteConnectionFailure()
         }
     }
 
@@ -419,6 +453,40 @@ export default class GameAutomationBridge<
 
     private recordFailure(message: string): void {
         this.state.lastError = message
+        this.state.status = 'disconnected'
+    }
+
+    /** Read the permission for the panel's display only; it decides nothing. */
+    private async refreshPermissionState(): Promise<void> {
+        const permission = await queryLocalNetworkAccess()
+        if (this.disposed) {
+            return
+        }
+        this.state.permissionState = permission
+    }
+
+    /**
+     * Called after a connection attempt really failed. Only then does a denied
+     * permission mean the browser blocked us: a page can be marked denied and
+     * still connect, for example when Chrome's `Local Network Access Checks`
+     * flag is switched off.
+     *
+     * While it is blocked, retrying is pointless (a denied page gets no new
+     * prompt), so the retry loop stops and the panel explains the two ways out.
+     */
+    private async noteConnectionFailure(): Promise<void> {
+        await this.refreshPermissionState()
+        if (this.disposed || this.state.permissionState !== 'denied') {
+            return
+        }
+        // a successful retry, or the player pressing 断开, wins over this
+        if (!this.wantConnection || this.state.status === 'connected') {
+            return
+        }
+        this.log('the connection failed and local network access is denied, stopping the retry loop')
+        this.clearRetryTimer()
+        this.wantConnection = false
+        this.state.blockedByBrowser = true
         this.state.status = 'disconnected'
     }
 
@@ -815,4 +883,27 @@ function extractActionList(payload: unknown): unknown[] | null {
         }
     }
     return null
+}
+
+/**
+ * Ask the browser whether this page may talk to the local network.
+ *
+ * Chrome gates requests from a public page (an `https://...` toy host) to a
+ * loopback address behind the `local-network-access` permission, and only
+ * prompts while the page has user activation. Browsers without that gate, or
+ * without the permission in their queryable set, answer `unknown`.
+ */
+async function queryLocalNetworkAccess(): Promise<AutomationLocalNetworkAccessState> {
+    const permissions = typeof navigator === 'undefined' ? undefined : navigator.permissions
+    if (!permissions || typeof permissions.query !== 'function') {
+        return 'unknown'
+    }
+    try {
+        // the name is not in the DOM typings yet
+        const descriptor = { name: 'local-network-access' } as unknown as PermissionDescriptor
+        const status = await permissions.query(descriptor)
+        return status.state
+    } catch {
+        return 'unknown'
+    }
 }

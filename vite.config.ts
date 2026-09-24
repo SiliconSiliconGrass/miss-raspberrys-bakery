@@ -6,6 +6,9 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Relative asset URLs, so the build also works when it is served from a
+  // sub-path instead of the root of a domain.
+  base: './',
   plugins: [
     vue(),
     vueDevTools(),

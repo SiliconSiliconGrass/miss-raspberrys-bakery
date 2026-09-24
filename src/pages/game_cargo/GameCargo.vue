@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 import { GameAutomationBridge, GameAutomationPanel } from '../../automation';
+import { assetUrl } from '../../utils/asset';
 
 import type GameState from './GameState';
 import type Piece from './Piece';
@@ -71,10 +72,13 @@ const SUBMIT_INTERVAL = 2000
  * type 1 uses the first image, type 2 the second one, and so on.
  */
 const ITEM_IMAGE_LIST = [
-    // '/images/it/flour.png',
-    // '/images/it/water_bucket.png',
-    '/images/it/energy_bread.svg',
+    // assetUrl('images/it/flour.png'),
+    // assetUrl('images/it/water_bucket.png'),
+    assetUrl('images/it/energy_bread.svg'),
 ]
+
+/** Background music of this game, loaded from wherever the app is served. */
+const BGM_SRC = assetUrl('music/ms4.mp3')
 
 
 /** One entry per piece of the game state, holding the piece itself and all of its elements. */
@@ -1693,8 +1697,9 @@ onMounted(() => {
     window.addEventListener('mousedown', onEmptyRoomMouseDown)
     // releasing the mouse outside of the window does not reach the page: drop the piece instead
     window.addEventListener('blur', onWindowMouseUp)
-    // dial the player's automation program, retrying once per second
-    automationBridge.connect()
+    // NOTE: no connect() here on purpose. The browser only asks for permission
+    // to reach the local network while the page has user activation, so the
+    // dial has to happen inside the click on the panel's 连接 button.
 })
 
 
@@ -1743,7 +1748,7 @@ onBeforeUnmount(() => {
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
     <GameAutomationPanel :bridge="automationBridge" />
-    <audio src="/music/ms4.mp3" autoplay loop></audio>
+    <audio :src="BGM_SRC" autoplay loop></audio>
 </template>
 
 

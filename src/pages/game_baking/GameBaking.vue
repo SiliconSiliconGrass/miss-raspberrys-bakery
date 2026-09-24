@@ -7,7 +7,10 @@ import {
     GameAutomationPanel,
     type AutomationBoardSnapshot,
 } from '../../automation';
+import { assetUrl } from '../../utils/asset';
 
+/** Background music of this game, loaded from wherever the app is served. */
+const BGM_SRC = assetUrl('music/ms1.mp3')
 
 /** One automation action: tapping the card at `rowInd` / `colInd`. */
 type BakingTapAction = {
@@ -402,8 +405,9 @@ onMounted(() => {
     startNextQuiz()
     cardFlipAnimationStep()
     window.addEventListener('resize', fitQuizCardArea)
-    // dial the player's automation program, retrying once per second
-    automationBridge.connect()
+    // NOTE: no connect() here on purpose. The browser only asks for permission
+    // to reach the local network while the page has user activation, so the
+    // dial has to happen inside the click on the panel's 连接 button.
 })
 
 onBeforeUnmount(() => {
@@ -460,7 +464,7 @@ onBeforeUnmount(() => {
         <button class="submit-button" :disabled="isSubmitting" @click="submitAnswer">提交</button>
     </div>
     <div class="miss-raspberry-cute"></div>
-    <audio src="/music/ms1.mp3" autoplay loop></audio>
+    <audio :src="BGM_SRC" autoplay loop></audio>
     <GameAutomationPanel :bridge="automationBridge" />
 </template>
 

@@ -16,8 +16,10 @@ Commit that lock file if you want runs to be reproducible, then:
 
     uv sync --frozen
 
-Then open `http://localhost:5173/game-cargo` in the browser; the page dials in
-by itself.
+Then open `http://localhost:5173/#/game-cargo` in the browser and click 连接 in
+the automation panel. The dial is not automatic: the browser only asks for
+permission to reach the local network while the page has user activation, so a
+connection started on page load is refused without ever showing a prompt.
 
 ## How it solves a level
 

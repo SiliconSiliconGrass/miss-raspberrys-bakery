@@ -14,7 +14,8 @@ Which actions get played is decided in solution.py, not here.
 Nothing here treats an error answer from the game as fatal: a refused action, a
 refused submit or a level the solver cannot handle is printed and then the run
 carries on with the next level. Only a lost connection ends a session, and then
-the game reconnects by itself.
+the game redials once per second until the player stops it (the very first
+connection has to be started from the page, see the README of the game).
 
 Usage:
     python main.py                # listens on ws://localhost:8000
@@ -309,7 +310,10 @@ def main() -> None:
     busy = threading.Lock()
     listeners = create_listeners(args.port, args.host)
     print("listening on " + ", ".join(f"ws://{format_address(sock)}" for sock in listeners), flush=True)
-    print("open http://localhost:5173/game-cargo, the game dials in by itself", flush=True)
+    print(
+        "open http://localhost:5173/#/game-cargo, then click 连接 in the automation panel",
+        flush=True,
+    )
 
     def handler(ws: Any) -> None:
         print(f"\nconnection from {getattr(ws, 'remote_address', None)}", flush=True)

@@ -206,7 +206,10 @@ def main() -> None:
     busy = threading.Lock()
     listeners = create_listeners(args.port, args.host)
     print("listening on " + ", ".join(f"ws://{format_address(sock)}" for sock in listeners), flush=True)
-    print("open http://localhost:5173/game-baking, the game dials in by itself", flush=True)
+    print(
+        "open http://localhost:5173/#/game-baking, then click 连接 in the automation panel",
+        flush=True,
+    )
 
     def handler(ws: Any) -> None:
         print(f"\nconnection from {getattr(ws, 'remote_address', None)}", flush=True)

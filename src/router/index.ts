@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import HomePage from '../pages/HomePage.vue'
 
 // RouteRecordRaw 是vue-router内置路由类型
@@ -26,7 +26,9 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  // Hash history: the host only serves `index.html` and does not rewrite
+  // unknown paths to it, so path based routes would 404 on reload.
+  history: createWebHashHistory(),
   routes,
 })
 

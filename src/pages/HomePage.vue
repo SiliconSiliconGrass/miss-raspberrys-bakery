@@ -1,8 +1,14 @@
 <script setup lang="ts">
     import { onBeforeUnmount, onMounted } from 'vue';
+    import { useRouter } from 'vue-router';
+    import { assetUrl } from '../utils/asset';
 
+    const router = useRouter();
+    const bgmSrc = assetUrl('music/ms2.mp3');
+
+    // Navigate by route name: the game is not served from the domain root.
     function startGame() {
-        window.location.href = "/game-baking"
+        router.push({ name: 'GameBaking' })
     }
 
     // these live on window, so they must be removed when the home page is left:
@@ -26,7 +32,7 @@
         CLICK OR PRESS ANY KEY TO START
     </div>
     <div class="bg-home"></div>
-    <audio src="/music/ms2.mp3" autoplay loop></audio>
+    <audio :src="bgmSrc" autoplay loop></audio>
 </template>
 
 <style scoped>

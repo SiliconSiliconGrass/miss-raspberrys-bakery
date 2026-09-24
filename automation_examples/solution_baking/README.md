@@ -17,5 +17,7 @@ To stay in sync with the lock file (for example in CI):
 
     uv sync --frozen
 
-Then open `http://localhost:5173/game-baking` in the browser; the page dials in
-by itself.
+Then open `http://localhost:5173/#/game-baking` in the browser and click 连接 in
+the automation panel. The dial is not automatic: the browser only asks for
+permission to reach the local network while the page has user activation, so a
+connection started on page load is refused without ever showing a prompt.

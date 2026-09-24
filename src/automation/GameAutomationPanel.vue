@@ -25,10 +25,15 @@ watch(
 )
 
 const status = computed(() => props.bridge.state.status)
+const isIdle = computed(() => status.value === 'idle')
 const isConnected = computed(() => status.value === 'connected')
 const isConnecting = computed(() => status.value === 'connecting')
+const isBlocked = computed(() => props.bridge.state.blockedByBrowser)
 
 const statusText = computed(() => {
+    if (isBlocked.value) {
+        return '被浏览器拦截'
+    }
     switch (status.value) {
         case 'connected':
             return '已连接'
@@ -40,6 +45,8 @@ const statusText = computed(() => {
     }
 })
 
+const dotClass = computed(() => (isBlocked.value ? 'is-blocked' : `is-${status.value}`))
+
 const queueText = computed(() => {
     const { pendingActions, executedActions } = props.bridge.state
     return `队列 ${pendingActions} · 已执行 ${executedActions}`
@@ -47,7 +54,39 @@ const queueText = computed(() => {
 
 /** While offline, show that the retry loop is alive and how often it tried. */
 const attemptText = computed(() =>
-    isConnected.value ? '' : `已尝试连接 ${props.bridge.state.attemptCount} 次`,
+    isConnected.value || isIdle.value ? '' : `已尝试连接 ${props.bridge.state.attemptCount} 次`,
+)
+
+/**
+ * The browser's verdict on this page reaching the local network, when it has
+ * something useful to say: `unknown` means the browser has no such gate (so
+ * nothing to show while developing on http://localhost), and `denied` is
+ * ambiguous enough that the blocked hint below says it better. Hidden while
+ * connected, where it would only contradict the green light.
+ */
+const permissionText = computed(() => {
+    if (isConnected.value) {
+        return ''
+    }
+    switch (props.bridge.state.permissionState) {
+        case 'granted':
+            return '已允许'
+        case 'prompt':
+            return '待询问'
+        default:
+            return ''
+    }
+})
+
+/**
+ * The connection is always started by a click: the browser only shows the
+ * local network access prompt while the page has user activation, so an
+ * automatic dial would be refused silently, with no prompt to accept.
+ */
+const hintText = computed(() =>
+    isIdle.value
+        ? '点「连接」开始。这一步必须由你亲自点：浏览器只在你操作之后才会询问是否允许访问本机网络。'
+        : '',
 )
 
 /** Returns false when the input is not a usable port, so we can flag it. */
@@ -96,21 +135,35 @@ function onRetry() {
         </label>
 
         <div class="status-row">
-            <span class="status-dot" :class="`is-${status}`"></span>
+            <span class="status-dot" :class="dotClass"></span>
             <span class="status-text">{{ statusText }}</span>
         </div>
 
         <div class="info-row">{{ bridge.state.serverUrl }}</div>
         <div class="info-row">{{ queueText }} · {{ bridge.actionIntervalMs / 1000 }} 秒 / 步</div>
+        <div v-if="permissionText" class="info-row">本地网络访问权限：{{ permissionText }}</div>
         <div v-if="attemptText" class="info-row">{{ attemptText }}</div>
 
+        <div v-if="isBlocked" class="hint-row is-blocked">
+            <div>
+                连不上，而且浏览器报告本地网络访问权限是「已拒绝」。先确认这个端口上确实有
+                服务端在监听；如果服务端没问题，那就是浏览器的 Local Network Access 拦住了。
+            </div>
+            <div>1. 点地址栏左侧的图标 → 网站设置 → 允许「本地网络访问」</div>
+            <div>
+                2. 或在 chrome://flags/#local-network-access-check 里把 Local Network Access
+                Checks 设为 Disabled（需要重启浏览器）
+            </div>
+            <div>改完点「重试」。</div>
+        </div>
+        <div v-else-if="hintText" class="hint-row">{{ hintText }}</div>
         <div v-if="bridge.state.lastError" class="error-row">{{ bridge.state.lastError }}</div>
 
         <div class="button-row">
             <button class="panel-button" :disabled="isConnected || isConnecting" @click="onConnect">
                 连接
             </button>
-            <button class="panel-button" :disabled="status === 'disconnected'" @click="onDisconnect">
+            <button class="panel-button" :disabled="isIdle" @click="onDisconnect">
                 断开
             </button>
             <button class="panel-button" @click="onRetry">重试</button>
@@ -192,10 +245,32 @@ function onRetry() {
     background-color: #ffd479;
 }
 
+.status-dot.is-blocked {
+    background-color: #ff8f8f;
+    box-shadow: 0 0 6px rgba(255, 90, 90, 0.9);
+}
+
 .info-row {
     font-size: 0.85em;
     opacity: 0.85;
     word-break: break-all;
+}
+
+.hint-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    padding: 0.35em 0.5em;
+    font-size: 0.85em;
+    color: #ffe9b3;
+    background-color: rgba(124, 50, 0, 0.4);
+    border-radius: 6px;
+    word-break: break-word;
+}
+
+.hint-row.is-blocked {
+    color: #ffd2d2;
+    background-color: rgba(200, 40, 40, 0.35);
 }
 
 .error-row {
