@@ -93,13 +93,15 @@
     // these live on window, so they must be removed when the home page is left:
     // otherwise every click inside the game reloads the page
     onMounted(() => {
-        window.addEventListener("click", onWindowClick)
-        window.addEventListener("keydown", onKeydown)
+        document.addEventListener("click", onWindowClick)
+        document.addEventListener("touchend", onWindowClick)
+        document.addEventListener("keydown", onKeydown)
     })
 
     onBeforeUnmount(() => {
-        window.removeEventListener("click", onWindowClick)
-        window.removeEventListener("keydown", onKeydown)
+        document.removeEventListener("click", onWindowClick)
+        document.removeEventListener("touchend", onWindowClick)
+        document.removeEventListener("keydown", onKeydown)
     })
 </script>
 
