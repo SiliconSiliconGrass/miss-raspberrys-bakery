@@ -4,7 +4,7 @@
     import { assetUrl } from '../utils/asset';
 
     const router = useRouter();
-    const bgmSrc = assetUrl('music/ms2.mp3');
+    const bgmSrc = assetUrl('music/ms3.mp3');
 
     interface LevelOption {
         /** Route name of the mini-game. */
