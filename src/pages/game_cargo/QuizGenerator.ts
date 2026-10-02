@@ -42,7 +42,7 @@ export default class QuizGenerator {
     constructor(numRows?: number, numCols?: number, numTypes?: number) {
         this.numRows = Math.max(1, Math.floor(numRows ?? randint(5, 8)))
         this.numCols = Math.max(1, Math.floor(numCols ?? randint(5, 8)))
-        this.numTypes = Math.max(1, Math.floor(numTypes ?? 1))
+        this.numTypes = Math.max(1, Math.floor(numTypes ?? randint(1, 2)))
 
         this._answer = []
     }
@@ -69,7 +69,10 @@ export default class QuizGenerator {
             pieces.push(...this.cutGroupIntoPieces(group))
         }
 
-        // 4. organize the result as the initial game state
+        // 4. do random rotation for each piece
+        
+
+        // 5. organize the result as the initial game state
         const {rowDemands, colDemands} = this.computeDemands(answer)
         const fixed: FixedConstraint[] = []
 

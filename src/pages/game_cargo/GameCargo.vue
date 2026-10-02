@@ -94,6 +94,7 @@ const ITEM_IMAGE_LIST = [
     // assetUrl('images/it/flour.png'),
     // assetUrl('images/it/water_bucket.png'),
     assetUrl('images/it/energy_bread.svg'),
+    assetUrl('images/it/raspberry_cake_transparent.png')
 ]
 
 /** Background music of this game, loaded from wherever the app is served. */
