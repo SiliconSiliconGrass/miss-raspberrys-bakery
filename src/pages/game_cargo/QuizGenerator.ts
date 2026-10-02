@@ -69,8 +69,16 @@ export default class QuizGenerator {
             pieces.push(...this.cutGroupIntoPieces(group))
         }
 
-        // 4. do random rotation for each piece
-        
+        // 4. do random rotation for each piece, baked straight into its shape
+        // matrix: if the turn lived in `rotation`, a player program could set
+        // `rotation` back to 0 and read the piece in the orientation it was cut
+        // in, which gives the answer away. Rewriting the matrix keeps the turn
+        // while leaving `rotation` at 0.
+        for (let piece of pieces) {
+            for (let i = randint(0, 3); i > 0; i--) {
+                piece.rotateShapeCW()
+            }
+        }
 
         // 5. organize the result as the initial game state
         const {rowDemands, colDemands} = this.computeDemands(answer)

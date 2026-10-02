@@ -49,6 +49,30 @@ export default class Piece {
         this.setRotation(this.rotation + 1)
     }
 
+    /**
+     * Rotate the piece by 90 degrees clockwise by rewriting its own shape
+     * matrix. Unlike `rotateCW()`, the `rotation` property is left alone: the
+     * turn is baked into `_shape` (and `width` / `height`), so a player program
+     * which reads the shape, or forces `rotation` back to `0`, still gets the
+     * turned piece instead of the orientation it was cut in.
+     */
+    rotateShapeCW() {
+        const height = this.height
+        const width = this.width
+        const rotated: number[][] = Array.from(
+            { length: width },
+            () => Array(height).fill(0)
+        )
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                rotated[x]![height - 1 - y] = this._shape[y]![x]!
+            }
+        }
+        this._shape = rotated
+        this.width = height
+        this.height = width
+    }
+
     /** `true` while the piece sits on the board. */
     get isPlaced(): boolean {
         return this.x >= 0 && this.y >= 0
