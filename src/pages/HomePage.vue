@@ -18,14 +18,14 @@
     const LEVEL_LIST: LevelOption[] = [
         {
             route: 'GameBaking',
-            title: '充能面包',
-            subtitle: '按目标配方烤面包',
+            title: '面包烘焙',
+            subtitle: '按目标配方进行烘焙',
             image: assetUrl('images/it/energy_bread.svg'),
         },
         {
             route: 'GameCargo',
             title: '货物装箱',
-            subtitle: '把货物拼进车厢',
+            subtitle: '把货物拼进货箱',
             image: assetUrl('images/it/box.png'),
         },
     ]
