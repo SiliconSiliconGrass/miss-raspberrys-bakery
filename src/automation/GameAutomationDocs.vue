@@ -216,6 +216,17 @@ const commands = [
     display: flex;
     flex-direction: column;
     gap: 1.1em;
+    /* the docs are meant to be read: use the system sans-serif, not the game's
+       handwritten font the surrounding panel uses */
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        'PingFang SC',
+        'Hiragino Sans GB',
+        'Microsoft YaHei',
+        'Noto Sans CJK SC',
+        sans-serif;
     font-size: 14px;
     line-height: 1.6;
     color: #4a2400;
@@ -368,7 +379,7 @@ code {
 }
 
 .code-empty {
-    font-family: 'DymonShouXieTi', sans-serif;
+    font-family: inherit;
     font-size: 13px;
     opacity: 0.7;
 }

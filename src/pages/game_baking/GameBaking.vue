@@ -5,6 +5,7 @@ import QuizGenerator from './QuizGenerator';
 import {
     GameAutomationBridge,
     GameAutomationPanel,
+    GameAutomationShareButton,
     type AutomationActionTypeDescriptor,
     type AutomationBoardSnapshot,
     type AutomationDocsConfig,
@@ -789,6 +790,18 @@ onBeforeUnmount(() => {
     </div>
     <div class="miss-raspberry-cute"></div>
     <BackHomeButton />
+    <!--
+        A phone hides the automation panel, so the share button is rendered on
+        its own: same top strip as the back button, centered between it and the
+        score.
+    -->
+    <GameAutomationShareButton
+        v-if="isPhone && levelSeed"
+        :seed="levelSeed"
+        class="phone-share"
+        label="分享本关"
+        copied-label="已复制"
+    />
     <audio :src="BGM_SRC" autoplay loop></audio>
     <!-- a phone plays with a finger: nothing to connect a player program to -->
     <GameAutomationPanel
@@ -1107,6 +1120,17 @@ html {
     flex-direction: row;
     align-items: baseline;
     gap: 0.5em;
+}
+
+/* sits in the top strip, centered between the back button and the score */
+.is-phone-baking .phone-share {
+    position: fixed;
+    left: 50%;
+    top: min(2.4vw, 2.4vh);
+    height: var(--back-home-height, 44px);
+    font-size: clamp(12px, 3.4vw, 16px);
+    transform: translateX(-50%);
+    z-index: 1000;
 }
 
 .is-phone-baking .score-label {

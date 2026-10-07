@@ -127,6 +127,8 @@
   `来挑战树莓娘面包坊里这一关吧！<url>`，`<url>` 由 `window.location` 现取
   （部署路径会变，例如
   `https://www.bilibili.com/toy/miss-raspberrys-bakery/`），种子放在 hash 路由之前。
+  手机（竖屏）上面板是隐藏的，这时游戏会单独渲染同一个按钮（「分享本关」），
+  放在顶部返回首页按钮和总得分之间。
 * **导入的种子关卡不计入总得分**（因为它不是随机发出来的）。`level.seedImported` 为
   `true` 表示当前这关是导入的，`submit` 结果里的 `counted` 为 `false`，`totalScore`
   保持上一关结束时的值；面板和游戏界面都会提示这一点。

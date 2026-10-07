@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import GameAutomationDocs from './GameAutomationDocs.vue'
+import GameAutomationShareButton from './GameAutomationShareButton.vue'
 import { copyTextToClipboard } from './clipboard'
 import type { AutomationDocsConfig } from './docs'
 import type {
@@ -262,7 +263,6 @@ function clearLog() {
 // ---------------------------------------------------------------------- seed
 
 const seedCopied = ref(false)
-const shareCopied = ref(false)
 const seedInput = ref('')
 const seedError = ref('')
 
@@ -289,35 +289,6 @@ function importSeed() {
     seedError.value = ''
     emit('importSeed', seed)
 }
-
-/**
- * The message the 分享 button copies. The base URL is read from the page
- * itself, because the deployment path is not known at build time (a toy can be
- * served from `https://www.bilibili.com/toy/miss-raspberrys-bakery/`, a local
- * dev server, …). The route is kept in the hash, the seed goes in front of it,
- * which is exactly the shape the games read back with `readSeedParam()`.
- */
-function buildShareMessage(seed: string): string {
-    const { origin, pathname, hash } = window.location
-    // keep `#/game-cargo`, drop a seed left over from an earlier share
-    const route = hash.split('?')[0] ?? ''
-    const url = `${origin}${pathname}?seed=${encodeURIComponent(seed)}${route}`
-    return `来挑战树莓娘面包坊里这一关吧！${url}`
-}
-
-async function shareSeed() {
-    if (!props.seed) {
-        return
-    }
-    const ok = await copyTextToClipboard(buildShareMessage(props.seed))
-    if (!ok) {
-        return
-    }
-    shareCopied.value = true
-    window.setTimeout(() => {
-        shareCopied.value = false
-    }, 1600)
-}
 </script>
 
 <template>
@@ -327,9 +298,7 @@ async function shareSeed() {
             copies a link to this exact level, so it is kept apart from the
             seed's own 复制 button.
         -->
-        <button v-if="seed" type="button" class="share-button" @click="shareSeed">
-            {{ shareCopied ? '已复制分享链接' : '分享这一关' }}
-        </button>
+        <GameAutomationShareButton v-if="seed" :seed="seed ?? ''" />
 
         <div class="automation-panel">
             <div class="panel-title">{{ title }}</div>
@@ -556,24 +525,6 @@ async function shareSeed() {
     border: 1px solid rgba(255, 246, 224, 0.35);
     border-radius: 12px;
     backdrop-filter: blur(4px);
-}
-
-.share-button {
-    padding: 0.35em 0.6em;
-    font-family: inherit;
-    font-size: 0.9em;
-    line-height: 1.2;
-    color: #7c3200;
-    text-shadow: none;
-    background-color: #ffe9b3;
-    border: none;
-    border-radius: 999px;
-    box-shadow: 0 2px 8px rgba(40, 20, 0, 0.3);
-    cursor: pointer;
-}
-
-.share-button:active {
-    transform: translateY(1px);
 }
 
 .panel-title {

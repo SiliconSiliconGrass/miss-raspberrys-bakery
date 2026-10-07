@@ -29,6 +29,7 @@ export { AUTOMATION_LOG_LIMIT } from './GameAutomationBridge'
 
 export { default as GameAutomationPanel } from './GameAutomationPanel.vue'
 export { default as GameAutomationDocs } from './GameAutomationDocs.vue'
+export { default as GameAutomationShareButton } from './GameAutomationShareButton.vue'
 
 export type { AutomationDocsConfig, AutomationDocsExample } from './docs'
 
