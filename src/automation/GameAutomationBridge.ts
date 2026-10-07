@@ -90,6 +90,31 @@ export interface GameAutomationBridgeOptions {
 export type AutomationConnectionStatus = 'idle' | 'disconnected' | 'connecting' | 'connected'
 
 /**
+ * Where a log line came from:
+ * - `in`    a frame the game received from the player program,
+ * - `out`   a frame the game sent to the player program,
+ * - `error` a rejected frame, a failed action / submit, or a connection error,
+ * - `info`  a connection milestone (connect, retry, level change, …).
+ */
+export type AutomationLogDirection = 'in' | 'out' | 'error' | 'info'
+
+/** One line of the panel's in-memory log. */
+export interface AutomationLogEntry {
+    /** Monotonic id; handy as a `v-for` key that survives trimming. */
+    id: number
+    /** Milliseconds since epoch. */
+    time: number
+    direction: AutomationLogDirection
+    /** Short label, e.g. `states`, `hello`, `submit`, `连接`. */
+    label: string
+    /** Full text: the raw JSON frame, or a human readable sentence. */
+    text: string
+}
+
+/** How many log lines the bridge keeps before dropping the oldest. */
+export const AUTOMATION_LOG_LIMIT = 500
+
+/**
  * What the browser says about this page reaching the local network. `unknown`
  * covers the browsers which have no such gate, or do not expose it.
  */
@@ -123,6 +148,11 @@ export interface GameAutomationBridgeState {
     droppedActions: number
     /** Timestamp of the last submission, null when nothing was submitted yet. */
     lastSubmitAt: number | null
+    /**
+     * Rolling log of the frames and milestones, newest last. Capped at
+     * `AUTOMATION_LOG_LIMIT` entries; the panel renders it behind its 日志 tab.
+     */
+    log: AutomationLogEntry[]
 }
 
 /** The subset of the bridge the reusable UI panel needs. */
@@ -134,6 +164,8 @@ export interface AutomationBridgeHandle {
     connect(port?: number): void
     disconnect(): void
     reconnect(): void
+    /** Empty the in-memory log shown by the panel. */
+    clearLog(): void
 }
 
 /**
@@ -171,6 +203,7 @@ export default class GameAutomationBridge<
     private wantConnection = false
     private lastSubmitAt = 0
     private disposed = false
+    private logId = 0
 
     constructor(
         adapter: GameAutomationAdapter<TAction, TState>,
@@ -201,6 +234,7 @@ export default class GameAutomationBridge<
             executedActions: 0,
             droppedActions: 0,
             lastSubmitAt: null,
+            log: [],
         })
 
         // only fills in the display before the player asks for a connection
@@ -233,6 +267,7 @@ export default class GameAutomationBridge<
             return
         }
         this.log(`connect requested, dialing ${this.state.serverUrl}`)
+        this.recordLog('info', '连接', `开始连接 ${this.state.serverUrl}`)
         this.wantConnection = true
         this.state.lastError = ''
         this.state.blockedByBrowser = false
@@ -247,6 +282,7 @@ export default class GameAutomationBridge<
     /** Stop dialing and close the current connection. */
     disconnect(): void {
         this.log('disconnect requested')
+        this.recordLog('info', '断开', '已手动断开连接')
         this.wantConnection = false
         this.clearRetryTimer()
         this.dropPendingSubmit()
@@ -282,6 +318,11 @@ export default class GameAutomationBridge<
         this.state.status = 'connecting'
         this.state.attemptCount += 1
         this.log(`opening ${this.state.serverUrl} (attempt ${this.state.attemptCount})`)
+        this.recordLog(
+            'info',
+            '连接',
+            `尝试连接 ${this.state.serverUrl}（第 ${this.state.attemptCount} 次）`,
+        )
 
         let socket: WebSocket
         try {
@@ -331,6 +372,7 @@ export default class GameAutomationBridge<
     private readonly handleOpen = (): void => {
         this.clearConnectTimer()
         this.log(`connected to ${this.state.serverUrl}`)
+        this.recordLog('info', '已连接', `成功连接到 ${this.state.serverUrl}`)
         this.state.status = 'connected'
         this.state.connectedAt = Date.now()
         this.state.attemptCount = 0
@@ -353,10 +395,10 @@ export default class GameAutomationBridge<
     private readonly handleMessage = (event: MessageEvent): void => {
         if (typeof event.data !== 'string') {
             this.log('<-- (binary frame ignored)')
+            this.recordLog('error', '非法帧', '收到二进制帧，只支持文本帧')
             this.sendFailure(undefined, AUTOMATION_ERROR_CODES.badRequest, 'only text frames are supported')
             return
         }
-        this.log(`<-- ${event.data}`)
 
         let command: AutomationCommand
         try {
@@ -369,9 +411,13 @@ export default class GameAutomationBridge<
             }
             command = parsed as AutomationCommand
         } catch (error) {
+            this.log(`<-- ${event.data}`)
+            this.recordLog('error', '非法帧', event.data)
             this.sendFailure(undefined, AUTOMATION_ERROR_CODES.badRequest, automationErrorMessage(error))
             return
         }
+
+        this.logFrame('in', command.type, event.data)
 
         switch (command.type) {
             case 'states':
@@ -402,6 +448,11 @@ export default class GameAutomationBridge<
         this.clearConnectTimer()
         const wasConnected = this.state.status === 'connected'
         this.log(`socket closed (code ${event.code}${event.reason ? `, reason ${event.reason}` : ''})`)
+        this.recordLog(
+            wasConnected ? 'error' : 'info',
+            '连接关闭',
+            `code ${event.code}${event.reason ? `, reason ${event.reason}` : ''}`,
+        )
         this.dropPendingSubmit()
         this.socket = null
         this.state.status = 'disconnected'
@@ -422,6 +473,7 @@ export default class GameAutomationBridge<
     private readonly handleError = (): void => {
         // the close event follows and schedules the retry
         this.log(`socket error on ${this.state.serverUrl}`)
+        this.logError('连接错误', `无法连接到 ${this.state.serverUrl}`)
         this.recordFailure(`cannot connect to ${this.state.serverUrl}`)
     }
 
@@ -431,6 +483,7 @@ export default class GameAutomationBridge<
             return
         }
         this.log(`retrying in ${this.reconnectIntervalMs} ms`)
+        this.recordLog('info', '重试', `${this.reconnectIntervalMs} ms 后重试`)
         this.retryTimer = setTimeout(() => {
             this.retryTimer = null
             this.openSocket()
@@ -484,6 +537,7 @@ export default class GameAutomationBridge<
             return
         }
         this.log('the connection failed and local network access is denied, stopping the retry loop')
+        this.logError('被拦截', '连接失败，且浏览器本地网络访问权限为「已拒绝」，已停止重试')
         this.clearRetryTimer()
         this.wantConnection = false
         this.state.blockedByBrowser = true
@@ -563,6 +617,11 @@ export default class GameAutomationBridge<
             `${this.actionIntervalMs} ms per action`,
             accepted,
         )
+        this.recordLog(
+            'info',
+            '动作入队',
+            `接受 ${accepted.length} 个动作，队列共 ${this.actionBuffer.length} 个，每 ${this.actionIntervalMs} ms 执行一个`,
+        )
 
         this.sendSuccess(command, {
             accepted: accepted.length,
@@ -589,6 +648,11 @@ export default class GameAutomationBridge<
             this.log(
                 `submit held back until ${this.actionBuffer.length} buffered action(s) ` +
                 `are done plus ${this.actionIntervalMs} ms`,
+            )
+            this.recordLog(
+                'info',
+                '提交排队',
+                `等待 ${this.actionBuffer.length} 个动作执行完，再等 ${this.actionIntervalMs} ms 后提交`,
             )
             this.flushPendingSubmit()
             return
@@ -659,6 +723,7 @@ export default class GameAutomationBridge<
             const result = this.adapter.submit() ?? {}
             this.markSubmitted()
             this.log('submit accepted:', result)
+            this.recordLog('info', '提交', JSON.stringify(result))
             this.sendSuccess(command, { ...result, submittedAt: Date.now() })
         } catch (error) {
             this.log('submit failed:', automationErrorMessage(error))
@@ -699,6 +764,11 @@ export default class GameAutomationBridge<
         return elapsed >= this.submitIntervalMs ? 0 : this.submitIntervalMs - elapsed
     }
 
+    /** Empty the in-memory log shown by the panel. */
+    clearLog(): void {
+        this.state.log.splice(0, this.state.log.length)
+    }
+
     // -------------------------------------------------------------- action buffer
 
     private startActionTimer(): void {
@@ -736,9 +806,11 @@ export default class GameAutomationBridge<
                 `(${this.actionBuffer.length} still buffered):`,
                 action,
             )
+            this.recordLog('info', '执行动作', JSON.stringify(action))
         } catch (error) {
             this.state.droppedActions += 1
             this.log('action failed:', automationErrorMessage(error))
+            this.logError('动作失败', automationErrorMessage(error))
             this.recordFailure(`action failed: ${automationErrorMessage(error)}`)
         }
 
@@ -770,6 +842,7 @@ export default class GameAutomationBridge<
     notifyLevelStarted(): void {
         if (this.clearActionBufferOnLevelChange && this.actionBuffer.length > 0) {
             this.log(`level changed, dropping ${this.actionBuffer.length} buffered action(s)`)
+            this.recordLog('info', '新关卡', `丢弃上一关残留的 ${this.actionBuffer.length} 个动作`)
             this.state.droppedActions += this.actionBuffer.length
             this.actionBuffer = []
             this.syncPendingActions()
@@ -830,9 +903,18 @@ export default class GameAutomationBridge<
         const text = JSON.stringify(message)
         if (!socket || socket.readyState !== WebSocket.OPEN) {
             this.log(`--> dropped (socket not open): ${text}`)
+            this.recordLog('error', '未发送', text)
             return
         }
-        this.log(`--> ${text}`)
+        if ('event' in message) {
+            this.logFrame('out', `event ${message.event}`, text)
+        } else if (message.ok === false) {
+            // a failure frame is what a player program has to react to, mark it red
+            this.log(`--> ${text}`)
+            this.recordLog('error', message.type, text)
+        } else {
+            this.logFrame('out', message.type, text)
+        }
         socket.send(text)
     }
 
@@ -842,6 +924,31 @@ export default class GameAutomationBridge<
             return
         }
         console.log('[automation]', ...parts)
+    }
+
+    /**
+     * Append one line to the in-memory log the panel shows. Independent of
+     * `debug`, which only controls the browser console: the panel needs the
+     * history whether or not the console is quiet.
+     */
+    private recordLog(direction: AutomationLogDirection, label: string, text: string): void {
+        this.logId += 1
+        this.state.log.push({ id: this.logId, time: Date.now(), direction, label, text })
+        if (this.state.log.length > AUTOMATION_LOG_LIMIT) {
+            this.state.log.splice(0, this.state.log.length - AUTOMATION_LOG_LIMIT)
+        }
+    }
+
+    /** Record one wire frame, both on the console and in the panel log. */
+    private logFrame(direction: 'in' | 'out', label: string, text: string): void {
+        this.log(`${direction === 'out' ? '-->' : '<--'} ${text}`)
+        this.recordLog(direction, label, text)
+    }
+
+    /** Record a connection / protocol error. */
+    private logError(label: string, text: string): void {
+        this.log(`!! ${label}: ${text}`)
+        this.recordLog('error', label, text)
     }
 
     private loadPort(): number | null {

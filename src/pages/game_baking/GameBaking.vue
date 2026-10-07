@@ -5,7 +5,9 @@ import QuizGenerator from './QuizGenerator';
 import {
     GameAutomationBridge,
     GameAutomationPanel,
+    type AutomationActionTypeDescriptor,
     type AutomationBoardSnapshot,
+    type AutomationDocsConfig,
 } from '../../automation';
 import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
@@ -445,6 +447,152 @@ function parseIndex(value: unknown, name: string, max: number): number {
 
 
 /**
+ * The action kinds the baking game accepts. Shared by `describeLevel()`
+ * (shipped to player programs) and the manual below, so they cannot drift.
+ */
+const BAKING_ACTION_TYPES: AutomationActionTypeDescriptor[] = [
+    {
+        kind: 'tap',
+        fields: { rowInd: 'int', colInd: 'int' },
+        description: '点一下 (rowInd, colInd)：它和上下左右共 5 格的数值各 +1，并对 numTypes 取模。',
+    },
+]
+
+/** The manual the automation panel shows behind its 文档 button. */
+const BAKING_AUTOMATION_DOCS: AutomationDocsConfig = {
+    gameId: 'baking',
+    title: '烘焙游戏自动化',
+    summary:
+        '读取棋盘与目标配方，用 tap 动作把棋子点成目标图案，再提交。'
+        + 'board 与 target 都是每次请求时的实时快照。',
+    actionTypes: BAKING_ACTION_TYPES,
+    examples: [
+        {
+            title: '查询当前局面',
+            description: '返回 level（尺寸与动作类型）、state（棋盘、目标、得分）与 queue（动作队列）。',
+            request: { id: 1, type: 'states' },
+            response: {
+                id: 1,
+                type: 'states.result',
+                ok: true,
+                payload: {
+                    gameId: 'baking',
+                    serverTime: 1730000000000,
+                    level: {
+                        numRows: 3,
+                        numCols: 3,
+                        numTypes: 2,
+                        actionTypes: BAKING_ACTION_TYPES,
+                    },
+                    state: {
+                        started: true,
+                        board: {
+                            numRows: 3,
+                            numCols: 3,
+                            numTypes: 2,
+                            matrix: [[0, 1, 0], [1, 0, 1], [0, 1, 0]],
+                        },
+                        target: {
+                            numRows: 3,
+                            numCols: 3,
+                            numTypes: 2,
+                            matrix: [[1, 1, 1], [1, 0, 1], [1, 1, 1]],
+                        },
+                        metrics: {
+                            similarity: 0.44,
+                            expectedScore: 0.04,
+                            totalScore: 10.1,
+                            isPerfect: false,
+                        },
+                        busy: false,
+                    },
+                    queue: {
+                        pending: 0,
+                        executed: 5,
+                        actionIntervalMs: 1000,
+                        submitHeld: false,
+                        submitReadyInMs: 0,
+                        submitIntervalMs: 2000,
+                    },
+                },
+            },
+        },
+        {
+            title: '点一个格子',
+            description: '动作按到达顺序进队列，每 1 秒执行一个；应答里的 pending 是队列长度。',
+            request: { id: 2, type: 'actions', payload: { actions: [{ rowInd: 1, colInd: 0 }] } },
+            response: {
+                id: 2,
+                type: 'actions.result',
+                ok: true,
+                payload: { accepted: 1, pending: 1, estimatedDrainMs: 1000, actionIntervalMs: 1000 },
+            },
+        },
+        {
+            title: '提交答案',
+            description: 'submit 会等队列排空，并与最后一个动作间隔 1 秒后才执行。',
+            request: { id: 3, type: 'submit' },
+            response: {
+                id: 3,
+                type: 'submit.result',
+                ok: true,
+                payload: {
+                    similarity: 1,
+                    expectedScore: 10,
+                    totalScore: 20.1,
+                    perfect: true,
+                    submittedAt: 1730000000000,
+                },
+            },
+        },
+        {
+            title: '游戏主动推送的开局事件',
+            description: '连上后收到 hello，之后每开一关收到 level.started；两者都带最新 state。',
+            response: {
+                type: 'event',
+                event: 'level.started',
+                payload: {
+                    gameId: 'baking',
+                    serverTime: 1730000000000,
+                    level: {
+                        numRows: 3,
+                        numCols: 3,
+                        numTypes: 2,
+                        actionTypes: BAKING_ACTION_TYPES,
+                    },
+                    state: {
+                        started: true,
+                        board: {
+                            numRows: 3,
+                            numCols: 3,
+                            numTypes: 2,
+                            matrix: [[0, 1, 0], [0, 1, 0], [1, 1, 0]],
+                        },
+                        target: {
+                            numRows: 3,
+                            numCols: 3,
+                            numTypes: 2,
+                            matrix: [[1, 1, 0], [1, 1, 0], [0, 1, 1]],
+                        },
+                        metrics: {
+                            similarity: 1,
+                            expectedScore: 10,
+                            totalScore: 20.1,
+                            isPerfect: true,
+                        },
+                        busy: false,
+                    },
+                },
+            },
+        },
+    ],
+    notes: [
+        '坐标越界会被整批拒绝，返回 invalid_action，该批动作一个都不会进队列。',
+        '提交后的过场动画期间 state.busy 为 true：动作暂缓执行，submit 返回 game_busy。',
+    ],
+}
+
+/**
  * The baking game's adapter for the shared automation protocol.
  * Everything protocol related (connection, retries, action buffer, rate
  * limits) lives in `GameAutomationBridge`, this object only touches the board.
@@ -472,8 +620,8 @@ const automationBridge = new GameAutomationBridge<BakingTapAction, Record<string
             numRows: quizBoard?.numRows ?? 0,
             numCols: quizBoard?.numCols ?? 0,
             numTypes: quizBoard?.numTypes ?? 0,
-            actionKind: 'tap',
-            actionFields: { rowInd: 'int', colInd: 'int' },
+            // always a list, even when the game accepts a single action kind
+            actionTypes: BAKING_ACTION_TYPES,
         }
     },
 
@@ -581,7 +729,11 @@ onBeforeUnmount(() => {
     <BackHomeButton />
     <audio :src="BGM_SRC" autoplay loop></audio>
     <!-- a phone plays with a finger: nothing to connect a player program to -->
-    <GameAutomationPanel v-if="!isPhone" :bridge="automationBridge" />
+    <GameAutomationPanel
+        v-if="!isPhone"
+        :bridge="automationBridge"
+        :docs="BAKING_AUTOMATION_DOCS"
+    />
 </template>
 
 

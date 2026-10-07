@@ -25,7 +25,13 @@
  * protocol and are enforced by the game, not by the player program.
  */
 
-export const AUTOMATION_PROTOCOL_VERSION = '1.0.0'
+/**
+ * The protocol version. Bumped to `1.1.0` when every game started reporting its
+ * actions as the unified `level.actionTypes` list (previously a single game
+ * used `actionKind` + `actionFields`, which did not generalise to several
+ * action kinds).
+ */
+export const AUTOMATION_PROTOCOL_VERSION = '1.1.0'
 
 /** A buffered action is executed once per second. */
 export const AUTOMATION_ACTION_INTERVAL_MS = 1000
@@ -136,6 +142,27 @@ export interface AutomationQueueSnapshot {
 /** Payload of the `actions` command / answer. */
 export interface AutomationActionsPayload<TAction = unknown> {
     actions: TAction[]
+}
+
+/**
+ * One action shape a game accepts.
+ *
+ * A game always reports its actions as a **list** (`level.actionTypes`), even
+ * when it only accepts a single kind, so a player program never has to
+ * special-case "one action" vs. "several actions". Each entry names the
+ * `kind` the action carries and lists every field that kind takes.
+ */
+export interface AutomationActionTypeDescriptor {
+    /** Value of the action's `kind` field, e.g. `"tap"`, `"place"` or `"clear"`. */
+    kind: string
+    /**
+     * Fields carried by this action: field name -> type, e.g.
+     * `{ "rowInd": "int", "colInd": "int" }`. Types are short human readable
+     * strings such as `"int"`, `"string"`, `"int[]"` or `"int | omitted"`.
+     */
+    fields: Record<string, string>
+    /** One sentence explaining what the action does. */
+    description?: string
 }
 
 export interface AutomationActionsResult {

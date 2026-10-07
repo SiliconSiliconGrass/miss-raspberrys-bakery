@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
-import { GameAutomationBridge, GameAutomationPanel } from '../../automation';
+import {
+    GameAutomationBridge,
+    GameAutomationPanel,
+    type AutomationActionTypeDescriptor,
+    type AutomationDocsConfig,
+} from '../../automation';
 import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
 import { getBackHomeRoom, isPhoneScreen, setPhoneLayoutFlag } from '../../utils/layout';
@@ -1906,6 +1911,182 @@ function applyCargoAction(action: CargoAutomationAction) {
 
 
 /**
+ * The action kinds the cargo game accepts. Shared by `describeLevel()` and the
+ * manual below, so the two can never drift apart.
+ */
+const CARGO_ACTION_TYPES: AutomationActionTypeDescriptor[] = [
+    {
+        kind: 'place',
+        fields: {
+            pieceInd: 'int | omitted',
+            row: 'int | omitted',
+            col: 'int | omitted',
+            rotation: 'int | omitted',
+            pieces: '[{ pieceInd, row, col, rotation? }] | omitted',
+        },
+        description:
+            '把 piece 旋转后外框的左上角放到 (row, col)。单个 piece 用 pieceInd / row / col / '
+            + 'rotation，多个 piece 用 pieces 数组，它们同属一步。rotation 是顺时针 90° 的个数，'
+            + '任意整数都可以（5 与 1 相同），省略则保持当前朝向。',
+    },
+    {
+        kind: 'clear',
+        fields: {},
+        description: '把棋盘上的所有 piece 送回 pieceBar。',
+    },
+]
+
+/** The manual the automation panel shows behind its 文档 button. */
+const CARGO_AUTOMATION_DOCS: AutomationDocsConfig = {
+    gameId: 'cargo',
+    title: '货物游戏自动化',
+    summary:
+        '把每一块拼图放到棋盘上，让每行 / 每列要求的方块数量都满足，再提交。'
+        + '这个游戏只看行 / 列计数，所以解不一定是出题时的原图。',
+    actionTypes: CARGO_ACTION_TYPES,
+    examples: [
+        {
+            title: '查询当前局面',
+            description: 'state 一次给全：行 / 列需求、固定格子、所有 piece 与得分。',
+            request: { id: 1, type: 'states' },
+            response: {
+                id: 1,
+                type: 'states.result',
+                ok: true,
+                payload: {
+                    gameId: 'cargo',
+                    serverTime: 1730000000000,
+                    level: {
+                        numRows: 4,
+                        numCols: 4,
+                        numTypes: 1,
+                        numPieces: 2,
+                        actionTypes: CARGO_ACTION_TYPES,
+                    },
+                    state: {
+                        started: true,
+                        numRows: 4,
+                        numCols: 4,
+                        numTypes: 1,
+                        rowDemands: [[2], [1], [1], [0]],
+                        colDemands: [[1], [1], [1], [1]],
+                        fixed: [{ row: 3, col: 3, typeId: -1 }],
+                        pieces: [
+                            {
+                                ind: 0,
+                                typeId: 1,
+                                shape: [[1, 1], [0, 1]],
+                                width: 2,
+                                height: 2,
+                                placement: null,
+                                unstable: false,
+                            },
+                            {
+                                ind: 1,
+                                typeId: 1,
+                                shape: [[1, 1, 1]],
+                                width: 3,
+                                height: 1,
+                                placement: { row: 2, col: 0, rotation: 0 },
+                                unstable: false,
+                            },
+                        ],
+                        metrics: {
+                            satisfaction: 0.75,
+                            expectedScore: 0.075,
+                            totalScore: 10.1,
+                            isDemandMet: false,
+                        },
+                        busy: false,
+                    },
+                    queue: {
+                        pending: 0,
+                        executed: 3,
+                        actionIntervalMs: 1000,
+                        submitHeld: false,
+                        submitReadyInMs: 0,
+                        submitIntervalMs: 2000,
+                    },
+                },
+            },
+        },
+        {
+            title: '放一个 piece',
+            description: 'row / col 从棋盘左上角算起，是 piece 旋转后外框的左上角。',
+            request: {
+                id: 2,
+                type: 'actions',
+                payload: { actions: [{ kind: 'place', pieceInd: 0, row: 0, col: 0, rotation: 0 }] },
+            },
+            response: {
+                id: 2,
+                type: 'actions.result',
+                ok: true,
+                payload: { accepted: 1, pending: 1, estimatedDrainMs: 1000, actionIntervalMs: 1000 },
+            },
+        },
+        {
+            title: '一次放多个 piece',
+            description: 'pieces 数组里的 piece 同属一步，仍然是一秒一步。',
+            request: {
+                id: 3,
+                type: 'actions',
+                payload: {
+                    actions: [
+                        {
+                            kind: 'place',
+                            pieces: [
+                                { pieceInd: 0, row: 0, col: 0 },
+                                { pieceInd: 1, row: 2, col: 0, rotation: 2 },
+                            ],
+                        },
+                    ],
+                },
+            },
+            response: {
+                id: 3,
+                type: 'actions.result',
+                ok: true,
+                payload: { accepted: 1, pending: 1, estimatedDrainMs: 1000, actionIntervalMs: 1000 },
+            },
+        },
+        {
+            title: '清空棋盘',
+            description: '把棋盘上所有 piece 送回 pieceBar；每关开头可以先清一次，避免上次的残留让新摆法变成 unstable。',
+            request: { id: 4, type: 'actions', payload: { actions: [{ kind: 'clear' }] } },
+            response: {
+                id: 4,
+                type: 'actions.result',
+                ok: true,
+                payload: { accepted: 1, pending: 1, estimatedDrainMs: 1000, actionIntervalMs: 1000 },
+            },
+        },
+        {
+            title: '提交答案',
+            request: { id: 5, type: 'submit' },
+            response: {
+                id: 5,
+                type: 'submit.result',
+                ok: true,
+                payload: {
+                    satisfaction: 1,
+                    expectedScore: 10,
+                    totalScore: 20.1,
+                    demandMet: true,
+                    submittedAt: 1730000000000,
+                },
+            },
+        },
+    ],
+    notes: [
+        'rotation 只写在矩阵外层，piece 的旋转已经烘焙进 shape；把 rotation 设为 0 不会得到出题时的原朝向。',
+        '旋转后放不进棋盘、row / col 越界都会被整批拒收并返回 invalid_action。',
+        '放上去压到别的块或 fixed 格子时照样放，该 piece 记为 unstable 并红光提示；再动到某个 piece 时会把其余 unstable 的 piece 送回 pieceBar。',
+        '提交后的过场动画期间 state.busy 为 true：动作暂缓执行，submit 返回 game_busy。',
+    ],
+}
+
+/**
  * The cargo game's adapter for the shared automation protocol. Everything
  * protocol related (connection, retries, action buffer, rate limits) lives in
  * `GameAutomationBridge`, this object only touches the board.
@@ -1923,8 +2104,8 @@ const automationBridge = new GameAutomationBridge<CargoAutomationAction, CargoAu
             numCols: game?.numCols ?? 0,
             numTypes: game?.numTypes ?? 0,
             numPieces: pieceViews.length,
-            actionKinds: ['place', 'clear'],
-            placeFields: {pieceInd: 'int', row: 'int', col: 'int', rotation: 'int | omitted'},
+            // always a list, even when the game accepts a single action kind
+            actionTypes: CARGO_ACTION_TYPES,
         }
     },
 
@@ -2037,7 +2218,11 @@ onBeforeUnmount(() => {
     >旋转</button>
     <BackHomeButton />
     <!-- a phone plays with a finger: nothing to connect a player program to -->
-    <GameAutomationPanel v-if="!isPhone" :bridge="automationBridge" />
+    <GameAutomationPanel
+        v-if="!isPhone"
+        :bridge="automationBridge"
+        :docs="CARGO_AUTOMATION_DOCS"
+    />
     <audio :src="BGM_SRC" autoplay loop></audio>
 </template>
 

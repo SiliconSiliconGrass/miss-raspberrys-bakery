@@ -6,9 +6,12 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `protocol.ts` | 协议常量与类型：命令、应答、事件、时间间隔 |
-| `GameAutomationBridge.ts` | 连接 / 重连、action 缓冲与执行节奏、提交限流 |
-| `GameAutomationPanel.vue` | 右侧面板：端口输入、连接 / 断开 / 重试、状态显示 |
+| `protocol.ts` | 协议常量与类型：命令、应答、事件、时间间隔、action 类型描述 |
+| `GameAutomationBridge.ts` | 连接 / 重连、action 缓冲与执行节奏、提交限流、收发日志 |
+| `GameAutomationPanel.vue` | 右侧折叠面板 + 弹窗：连接设置、日志窗口、文档 |
+| `GameAutomationDocs.vue` | 由小游戏传 props 驱动的自动化文档组件 |
+| `docs.ts` | 文档组件的 props 类型（`AutomationDocsConfig` 等） |
+| `clipboard.ts` | 复制到剪贴板（含非安全上下文的兜底） |
 | `index.ts` | 统一出口 |
 
 ## 连接方式
@@ -22,7 +25,10 @@
 * 连接失败（包括握手迟迟不完成）后**每秒重试一次**，直到连上或被手动断开。
 * 浏览器明确报告本地网络访问被拒时，重试会停下来，面板改成提示去开启权限；
   改完站点设置后点「重试」即可。
-* 页面右侧面板提供 `连接` / `断开` / `重试` 三个按钮和实时状态。
+* 页面右侧面板提供 `连接` / `断开` 按钮和实时状态；点 `详情` 打开更大的弹窗，
+  里面有完整的连接设置、`日志` 窗口和 `文档`。日志窗口可滚动、可复制（点某一行
+  复制该行，或用「复制全部」）、使用等宽字体，按方向区分显示双方收发的每一帧和
+  错误信息。
 
 ## 协议
 
@@ -50,7 +56,7 @@
 ### 事件（游戏 → 玩家程序，主动推送）
 
 ```json
-{ "type": "event", "event": "hello",         "payload": { "protocolVersion": "1.0.0", "gameId": "baking", "actionIntervalMs": 1000, "submitIntervalMs": 2000, "level": { }, "state": { } } }
+{ "type": "event", "event": "hello",         "payload": { "protocolVersion": "1.1.0", "gameId": "baking", "actionIntervalMs": 1000, "submitIntervalMs": 2000, "level": { }, "state": { } } }
 { "type": "event", "event": "level.started", "payload": { "gameId": "baking", "level": { }, "state": { } } }
 ```
 
@@ -76,6 +82,31 @@
 所以「点卡片 → 提交」之间的节奏和「点卡片 → 点卡片」一样是 1 秒。
 这期间若再发一次 `submit`，返回 `submit_pending`。
 
+### 关卡描述：`level.actionTypes`
+
+`hello` / `level.started` / `states` 里的 `level` 都会带一份统一的动作描述，
+**永远是数组**，即使游戏只接受一种动作：
+
+```json
+{
+  "numRows": 5, "numCols": 4, "numTypes": 2,
+  "actionTypes": [
+    {
+      "kind": "tap",
+      "fields": { "rowInd": "int", "colInd": "int" },
+      "description": "点一下这个格子：它和上下左右共 5 格的数值各 +1，并对 numTypes 取模。"
+    }
+  ]
+}
+```
+
+* `kind`：动作的 `kind` 值。只有一种动作时这个字段依然保留。
+* `fields`：该动作携带的字段，字段名 → 类型；类型是简短的人类可读字符串，
+  例如 `int`、`string`、`int | omitted`、`[{ ... }] | omitted`。
+* `description`：一句话说明，可选。
+
+之前烘焙游戏用的单数 `actionKind` + `actionFields` 已去掉，所有游戏统一走这个格式。
+
 ## 烘焙游戏（GameBaking）
 
 `states` 应答的 `payload`：
@@ -84,7 +115,9 @@
 {
   "gameId": "baking",
   "serverTime": 1730000000000,
-  "level": { "numRows": 5, "numCols": 4, "numTypes": 2, "actionKind": "tap", "actionFields": { "rowInd": "int", "colInd": "int" } },
+  "level": { "numRows": 5, "numCols": 4, "numTypes": 2,
+             "actionTypes": [ { "kind": "tap", "fields": { "rowInd": "int", "colInd": "int" },
+                                "description": "点一下这个格子：它和上下左右共 5 格的数值各 +1，并对 numTypes 取模。" } ] },
   "state": {
     "started": true,
     "board":  { "numRows": 5, "numCols": 4, "numTypes": 2, "matrix": [[0,1],[1,0]] },
@@ -120,7 +153,15 @@
 {
   "gameId": "cargo",
   "serverTime": 1730000000000,
-  "level": { "numRows": 8, "numCols": 8, "numTypes": 1, "numPieces": 12, "actionKinds": ["place", "clear"] },
+  "level": { "numRows": 8, "numCols": 8, "numTypes": 1, "numPieces": 12,
+             "actionTypes": [
+               { "kind": "place",
+                 "fields": { "pieceInd": "int | omitted", "row": "int | omitted", "col": "int | omitted",
+                             "rotation": "int | omitted", "pieces": "[{ pieceInd, row, col, rotation? }] | omitted" },
+                 "description": "把 piece 旋转后外框的左上角放到 (row, col)。单个 piece 用 pieceInd / row / col / rotation，多个 piece 用 pieces 数组。" },
+               { "kind": "clear", "fields": {},
+                 "description": "把棋盘上的所有 piece 送回 pieceBar。" }
+             ] },
   "state": {
     "started": true,
     "numRows": 8,
@@ -180,12 +221,34 @@
 ## 接到新小游戏上
 
 ```ts
-import { GameAutomationBridge, GameAutomationPanel } from '@/automation'
+import {
+    GameAutomationBridge,
+    GameAutomationPanel,
+    type AutomationActionTypeDescriptor,
+    type AutomationDocsConfig,
+} from '@/automation'
+
+// 动作描述只写一份：describeLevel() 和文档组件共用，避免两边说法不一致
+const ACTION_TYPES: AutomationActionTypeDescriptor[] = [
+    { kind: 'tap', fields: { rowInd: 'int', colInd: 'int' }, description: '点一下这个格子。' },
+]
+
+// 文档组件的 props：小游戏按自己的情况填
+const DOCS: AutomationDocsConfig = {
+    gameId: 'my-game',
+    title: '我的小游戏自动化',
+    summary: '一句话说明玩家程序要做什么。',
+    actionTypes: ACTION_TYPES,
+    examples: [
+        { title: '查询局面', request: { id: 1, type: 'states' }, response: { /* states.result */ } },
+    ],
+    notes: ['可选：任何容易踩坑的地方。'],
+}
 
 const bridge = new GameAutomationBridge<MyAction, MyState>({
     gameId: 'my-game',
     getState: () => ({ /* 每次调用都读当前局面 */ }),
-    describeLevel: () => ({ /* 棋盘尺寸之类的元信息，可省略 */ }),
+    describeLevel: () => ({ /* 棋盘尺寸之类的元信息 */ actionTypes: ACTION_TYPES }),
     normalizeAction: (raw) => {
         // 校验并把玩家传来的 JSON 变成内部 action，抛 Error 即拒收
         return { ... }
@@ -209,8 +272,11 @@ bridge.markSubmitted()
 ```
 
 ```html
-<GameAutomationPanel :bridge="bridge" />
+<GameAutomationPanel :bridge="bridge" :docs="DOCS" />
 ```
+
+面板默认折叠在右侧；点 `详情` / `日志` / `文档` 会打开弹窗，分别落在连接设置、
+收发日志和这份文档上。`docs` 省略时 `文档` 按钮自动隐藏。
 
 ## 测试服务端
 
