@@ -1,35 +1,44 @@
-import randint from "@/utils/random/randint";
+import Random from "@/utils/random/Random";
 import BakingBoard from "./BakingBoard";
 
 export default class QuizGenerator {
 
     _answer: BakingBoard
+    /** The seeded source every random draw of this quiz comes from. */
+    private random: Random
 
-    constructor(answer?: BakingBoard, numRows?: number, numCols?: number, numTypes?: number) {
+    constructor(
+        seed: string,
+        answer?: BakingBoard,
+        numRows?: number,
+        numCols?: number,
+        numTypes?: number,
+    ) {
+        this.random = new Random(seed)
 
         numTypes = 2 // currently only 2 types
         
         if (!answer) {
             if (!numRows) {
-                numRows = randint(3, 7)
+                numRows = this.random.randint(3, 7)
             }
             if (!numCols) {
-                numCols = randint(3, 7)
+                numCols = this.random.randint(3, 7)
             }
             if (!numTypes) {
-                numTypes = randint(2, 3)
+                numTypes = this.random.randint(2, 3)
             }
 
             // zero matrix
             this._answer = new BakingBoard(numRows, numCols, numTypes)
 
             // diagonal symmetries are only valid on a square board
-            const symetricType = randint(0, numRows === numCols ? 4 : 2)
-            const numVar = randint(10, 20)
+            const symetricType = this.random.randint(0, numRows === numCols ? 4 : 2)
+            const numVar = this.random.randint(10, 20)
             for (let i = 0; i < numVar; i++) {
-                const rowInd = randint(0, numRows - 1)
-                const colInd = randint(0, numCols - 1)
-                const typeId = randint(1, numTypes - 1)
+                const rowInd = this.random.randint(0, numRows - 1)
+                const colInd = this.random.randint(0, numCols - 1)
+                const typeId = this.random.randint(1, numTypes - 1)
 
                 let targets
                 if (symetricType === 0) {
@@ -95,12 +104,11 @@ export default class QuizGenerator {
             this._answer.numTypes,
             this._answer._matrix.map(row => [...row])
         )
-        const numTaps = randint(3, 10)
+        const numTaps = this.random.randint(3, 10)
         for (let i = 0; i < numTaps; i++) {
-            const rowInd = randint(0, this._answer.numRows - 1)
-            const colInd = randint(0, this._answer.numCols - 1)
+            const rowInd = this.random.randint(0, this._answer.numRows - 1)
+            const colInd = this.random.randint(0, this._answer.numCols - 1)
             quiz.tapAt(rowInd, colInd)
-            console.log(`solution: tap at row ${rowInd + 1}, col ${colInd + 1}`)
         }
         return quiz
     }

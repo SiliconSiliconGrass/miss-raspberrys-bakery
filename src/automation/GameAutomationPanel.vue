@@ -23,9 +23,24 @@ const props = withDefaults(
         title?: string
         /** The game's documentation; without it the 文档 button is hidden. */
         docs?: AutomationDocsConfig
+        /**
+         * Seed of the level being played, when the game has one. Shown in the
+         * panel with a copy button so a level can be exported and replayed.
+         */
+        seed?: string
+        /**
+         * True while the current level came from an imported seed rather than a
+         * random deal. Imported levels do not count toward the total score, and
+         * the panel says so next to the seed.
+         */
+        seedImported?: boolean
     }>(),
     { title: '自动化接入' },
 )
+
+const emit = defineEmits<{
+    (event: 'importSeed', seed: string): void
+}>()
 
 type PanelTab = 'connect' | 'log' | 'docs'
 
@@ -243,36 +258,114 @@ function clearLog() {
     props.bridge.clearLog()
     autoScroll.value = true
 }
+
+// ---------------------------------------------------------------------- seed
+
+const seedCopied = ref(false)
+const shareCopied = ref(false)
+const seedInput = ref('')
+const seedError = ref('')
+
+async function copySeed() {
+    if (!props.seed) {
+        return
+    }
+    const ok = await copyTextToClipboard(props.seed)
+    if (!ok) {
+        return
+    }
+    seedCopied.value = true
+    window.setTimeout(() => {
+        seedCopied.value = false
+    }, 1200)
+}
+
+function importSeed() {
+    const seed = seedInput.value.trim()
+    if (seed === '') {
+        seedError.value = '请输入种子'
+        return
+    }
+    seedError.value = ''
+    emit('importSeed', seed)
+}
+
+/**
+ * The message the 分享 button copies. The base URL is read from the page
+ * itself, because the deployment path is not known at build time (a toy can be
+ * served from `https://www.bilibili.com/toy/miss-raspberrys-bakery/`, a local
+ * dev server, …). The route is kept in the hash, the seed goes in front of it,
+ * which is exactly the shape the games read back with `readSeedParam()`.
+ */
+function buildShareMessage(seed: string): string {
+    const { origin, pathname, hash } = window.location
+    // keep `#/game-cargo`, drop a seed left over from an earlier share
+    const route = hash.split('?')[0] ?? ''
+    const url = `${origin}${pathname}?seed=${encodeURIComponent(seed)}${route}`
+    return `来挑战树莓娘面包坊里这一关吧！${url}`
+}
+
+async function shareSeed() {
+    if (!props.seed) {
+        return
+    }
+    const ok = await copyTextToClipboard(buildShareMessage(props.seed))
+    if (!ok) {
+        return
+    }
+    shareCopied.value = true
+    window.setTimeout(() => {
+        shareCopied.value = false
+    }, 1600)
+}
 </script>
 
 <template>
-    <div class="automation-panel">
-        <div class="panel-title">{{ title }}</div>
+    <div class="automation-dock">
+        <!--
+            Sharing lives above the panel, on the right side of the page: it
+            copies a link to this exact level, so it is kept apart from the
+            seed's own 复制 button.
+        -->
+        <button v-if="seed" type="button" class="share-button" @click="shareSeed">
+            {{ shareCopied ? '已复制分享链接' : '分享这一关' }}
+        </button>
 
-        <div class="status-row">
-            <span class="status-dot" :class="dotClass"></span>
-            <span class="status-text">{{ statusText }}</span>
-        </div>
+        <div class="automation-panel">
+            <div class="panel-title">{{ title }}</div>
 
-        <div class="info-row">{{ bridge.state.serverUrl }}</div>
-        <div class="info-row">{{ queueText }}</div>
+            <div class="status-row">
+                <span class="status-dot" :class="dotClass"></span>
+                <span class="status-text">{{ statusText }}</span>
+            </div>
 
-        <div class="button-row">
-            <button class="panel-button" :disabled="isConnected || isConnecting" @click="onConnect">
-                连接
-            </button>
-            <button class="panel-button" :disabled="isIdle" @click="onDisconnect">
-                断开
-            </button>
-            <button class="panel-button" @click="openModal('connect')">详情</button>
-        </div>
+            <div class="info-row">{{ bridge.state.serverUrl }}</div>
+            <div class="info-row">{{ queueText }}</div>
 
-        <div class="link-row">
-            <button class="link-button" @click="openModal('log')">
-                日志<span v-if="logEntries.length > 0">（{{ logEntries.length }}）</span>
-            </button>
-            <span class="link-sep">·</span>
-            <button class="link-button" :disabled="!docs" @click="openModal('docs')">文档</button>
+            <div v-if="seed" class="seed-row">
+                <span class="seed-label">种子</span>
+                <code class="seed-value">{{ seed }}</code>
+                <button class="seed-copy" @click="copySeed">{{ seedCopied ? '已复制' : '复制' }}</button>
+            </div>
+            <div v-if="seedImported" class="seed-note">导入种子关 · 本关不计分</div>
+
+            <div class="button-row">
+                <button class="panel-button" :disabled="isConnected || isConnecting" @click="onConnect">
+                    连接
+                </button>
+                <button class="panel-button" :disabled="isIdle" @click="onDisconnect">
+                    断开
+                </button>
+                <button class="panel-button" @click="openModal('connect')">详情</button>
+            </div>
+
+            <div class="link-row">
+                <button class="link-button" @click="openModal('log')">
+                    日志<span v-if="logEntries.length > 0">（{{ logEntries.length }}）</span>
+                </button>
+                <span class="link-sep">·</span>
+                <button class="link-button" :disabled="!docs" @click="openModal('docs')">文档</button>
+            </div>
         </div>
     </div>
 
@@ -329,6 +422,34 @@ function clearLog() {
 
                         <div class="detail-row"><span class="detail-label">地址</span>{{ bridge.state.serverUrl }}</div>
                         <div class="detail-row"><span class="detail-label">队列</span>{{ queueText }} · {{ bridge.actionIntervalMs / 1000 }} 秒 / 步</div>
+                        <div class="seed-block">
+                            <div class="detail-row">
+                                <span class="detail-label">种子</span>
+                                <span class="seed-inline">
+                                    <code v-if="seed" class="seed-value is-inline">{{ seed }}</code>
+                                    <span v-else class="seed-value is-inline is-empty">（尚未开局）</span>
+                                    <button v-if="seed" class="seed-copy" @click="copySeed">
+                                        {{ seedCopied ? '已复制' : '复制' }}
+                                    </button>
+                                    <span v-if="seedImported" class="seed-badge">导入</span>
+                                </span>
+                            </div>
+                            <div class="seed-import">
+                                <input
+                                    v-model="seedInput"
+                                    class="seed-input"
+                                    type="text"
+                                    spellcheck="false"
+                                    placeholder="输入种子，例如 3f9c1a07"
+                                    @keydown.enter="importSeed"
+                                />
+                                <button class="panel-button is-small" @click="importSeed">导入</button>
+                            </div>
+                            <div class="seed-warning">
+                                导入的种子关卡不计入总得分（submit 结果里的 counted 为 false）。
+                            </div>
+                            <div v-if="seedError" class="error-row">{{ seedError }}</div>
+                        </div>
                         <div v-if="permissionText" class="detail-row">
                             <span class="detail-label">本地网络</span>{{ permissionText }}
                         </div>
@@ -407,19 +528,27 @@ function clearLog() {
 </template>
 
 <style scoped>
-.automation-panel {
+.automation-dock {
     position: fixed;
     right: min(5vw, 5vh);
     top: 50vh;
     transform: translateY(-50%);
     width: min(20vw, 220px);
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: min(1vh, 8px);
+    font-family: 'DymonShouXieTi', sans-serif;
+    font-size: min(1.5vw, 2.2vh);
+}
+
+.automation-panel {
+    box-sizing: border-box;
     padding: min(1.6vh, 14px);
     display: flex;
     flex-direction: column;
     gap: min(1vh, 8px);
-    font-family: 'DymonShouXieTi', sans-serif;
-    font-size: min(1.5vw, 2.2vh);
     line-height: 1.3;
     color: #fff6e0;
     text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
@@ -427,6 +556,24 @@ function clearLog() {
     border: 1px solid rgba(255, 246, 224, 0.35);
     border-radius: 12px;
     backdrop-filter: blur(4px);
+}
+
+.share-button {
+    padding: 0.35em 0.6em;
+    font-family: inherit;
+    font-size: 0.9em;
+    line-height: 1.2;
+    color: #7c3200;
+    text-shadow: none;
+    background-color: #ffe9b3;
+    border: none;
+    border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(40, 20, 0, 0.3);
+    cursor: pointer;
+}
+
+.share-button:active {
+    transform: translateY(1px);
 }
 
 .panel-title {
@@ -489,6 +636,105 @@ function clearLog() {
     font-size: 0.85em;
     opacity: 0.85;
     word-break: break-all;
+}
+
+.seed-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.85em;
+}
+
+.seed-label {
+    flex: none;
+    opacity: 0.7;
+}
+
+.seed-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: text;
+}
+
+.seed-value.is-inline {
+    flex: none;
+}
+
+.seed-value.is-empty {
+    opacity: 0.6;
+    font-family: 'DymonShouXieTi', sans-serif;
+}
+
+.seed-note {
+    font-size: 0.8em;
+    color: #ffd479;
+}
+
+.seed-copy {
+    flex: none;
+    padding: 0.1em 0.6em;
+    font-family: inherit;
+    font-size: 0.9em;
+    color: #7c3200;
+    background-color: #ffe9b3;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+}
+
+.seed-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    min-width: 0;
+}
+
+.seed-badge {
+    flex: none;
+    padding: 0 0.4em;
+    font-size: 0.85em;
+    color: #a35a00;
+    border: 1px solid #a35a00;
+    border-radius: 999px;
+}
+
+.seed-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4em;
+}
+
+.seed-import {
+    display: flex;
+    gap: 0.4em;
+}
+
+.seed-input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0.25em 0.5em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    font-size: 0.9em;
+    color: #7c3200;
+    background-color: #ffe9b3;
+    border: none;
+    border-radius: 6px;
+    user-select: text;
+}
+
+.seed-warning {
+    font-size: 0.82em;
+    color: #b06000;
+}
+
+/* the light modal needs a darker error colour than the dark collapsed panel */
+.modal-body .error-row {
+    color: #c0392b;
 }
 
 .hint-row {

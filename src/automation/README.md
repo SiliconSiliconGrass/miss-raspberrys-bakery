@@ -107,6 +107,30 @@
 
 之前烘焙游戏用的单数 `actionKind` + `actionFields` 已去掉，所有游戏统一走这个格式。
 
+### 关卡种子：`level.seed`
+
+小游戏的随机出题全部走种子化随机数（`src/utils/random/Random.ts`，mulberry32），
+每一关都有自己的种子，`level.seed` 就是它：
+
+```json
+"level": { "numRows": 8, "numCols": 8, "numTypes": 1,
+           "seed": "3f9c1a07", "seedImported": false, "actionTypes": [ ] }
+```
+
+* 同一个种子一定得到同一关：复制出来即可复现，报 bug 时直接把它贴出来。
+* 面板的「种子」一栏可以把种子填回去导入；用 `?seed=<种子>` 打开页面同样会用这个种子
+  开始第一关，之后的关卡继续随机：
+  `http://localhost:5173/?seed=3f9c1a07#/game-cargo`
+  （种子也可以写在 hash 路由里：`#/game-cargo?seed=3f9c1a07`）。
+* 面板上会显示当前种子，点「复制」即可导出。
+* 面板上方、页面右侧偏上的「分享这一关」按钮会复制一句
+  `来挑战树莓娘面包坊里这一关吧！<url>`，`<url>` 由 `window.location` 现取
+  （部署路径会变，例如
+  `https://www.bilibili.com/toy/miss-raspberrys-bakery/`），种子放在 hash 路由之前。
+* **导入的种子关卡不计入总得分**（因为它不是随机发出来的）。`level.seedImported` 为
+  `true` 表示当前这关是导入的，`submit` 结果里的 `counted` 为 `false`，`totalScore`
+  保持上一关结束时的值；面板和游戏界面都会提示这一点。
+
 ## 烘焙游戏（GameBaking）
 
 `states` 应答的 `payload`：
@@ -115,7 +139,7 @@
 {
   "gameId": "baking",
   "serverTime": 1730000000000,
-  "level": { "numRows": 5, "numCols": 4, "numTypes": 2,
+  "level": { "numRows": 5, "numCols": 4, "numTypes": 2, "seed": "3f9c1a07",
              "actionTypes": [ { "kind": "tap", "fields": { "rowInd": "int", "colInd": "int" },
                                 "description": "点一下这个格子：它和上下左右共 5 格的数值各 +1，并对 numTypes 取模。" } ] },
   "state": {
@@ -139,7 +163,7 @@
 `submit` 的应答：
 
 ```json
-{ "similarity": 1, "expectedScore": 10, "totalScore": 20.1, "perfect": true, "submittedAt": 1730000000000 }
+{ "similarity": 1, "expectedScore": 10, "totalScore": 20.1, "perfect": true, "counted": true, "submittedAt": 1730000000000 }
 ```
 
 提交后关卡会在约 2 秒的淡入淡出中切换，期间 `state.busy` 为 `true`，
@@ -153,7 +177,7 @@
 {
   "gameId": "cargo",
   "serverTime": 1730000000000,
-  "level": { "numRows": 8, "numCols": 8, "numTypes": 1, "numPieces": 12,
+  "level": { "numRows": 8, "numCols": 8, "numTypes": 1, "numPieces": 12, "seed": "5b2e9d10",
              "actionTypes": [
                { "kind": "place",
                  "fields": { "pieceInd": "int | omitted", "row": "int | omitted", "col": "int | omitted",
@@ -210,7 +234,7 @@
 `submit` 的应答：
 
 ```json
-{ "satisfaction": 1, "expectedScore": 10, "totalScore": 20.1, "demandMet": true, "submittedAt": 1730000000000 }
+{ "satisfaction": 1, "expectedScore": 10, "totalScore": 20.1, "demandMet": true, "counted": true, "submittedAt": 1730000000000 }
 ```
 
 提交后棋盘和 pieceBar 会在约 2 秒的淡入淡出中换成下一题，期间
@@ -277,6 +301,10 @@ bridge.markSubmitted()
 
 面板默认折叠在右侧；点 `详情` / `日志` / `文档` 会打开弹窗，分别落在连接设置、
 收发日志和这份文档上。`docs` 省略时 `文档` 按钮自动隐藏。
+
+出题不要直接用 `Math.random`：给每一关一个种子，用
+`src/utils/random/Random.ts` 生成关卡，把种子放进 `describeLevel()` 的
+`seed` 字段，再传给面板的 `:seed`（面板会显示并允许复制）。这样关卡才可复现。
 
 ## 测试服务端
 

@@ -1,4 +1,4 @@
-import randint from "@/utils/random/randint";
+import Random from "@/utils/random/Random";
 
 import GameState from "./GameState";
 import Piece from "./Piece";
@@ -17,19 +17,6 @@ interface Group {
 }
 
 
-/** Fisher-Yates shuffle. Returns a new array, the argument is not modified. */
-function shuffle<T>(array: T[]): T[] {
-    const result = [...array]
-    for (let i = result.length - 1; i > 0; i--) {
-        const j = randint(0, i)
-        const tmp = result[i]!
-        result[i] = result[j]!
-        result[j] = tmp
-    }
-    return result
-}
-
-
 export default class QuizGenerator {
 
     numRows: number
@@ -39,10 +26,15 @@ export default class QuizGenerator {
     /** The assembled picture of the last generated quiz. `0` is empty, otherwise a type id. */
     _answer: number[][]
 
-    constructor(numRows?: number, numCols?: number, numTypes?: number) {
-        this.numRows = Math.max(1, Math.floor(numRows ?? randint(5, 8)))
-        this.numCols = Math.max(1, Math.floor(numCols ?? randint(5, 8)))
-        this.numTypes = Math.max(1, Math.floor(numTypes ?? randint(1, 2)))
+    /** The seeded source every random draw of this quiz comes from. */
+    private random: Random
+
+    constructor(seed: string, numRows?: number, numCols?: number, numTypes?: number) {
+        this.random = new Random(seed)
+
+        this.numRows = Math.max(1, Math.floor(numRows ?? this.random.randint(5, 8)))
+        this.numCols = Math.max(1, Math.floor(numCols ?? this.random.randint(5, 8)))
+        this.numTypes = Math.max(1, Math.floor(numTypes ?? this.random.randint(1, 2)))
 
         this._answer = []
     }
@@ -75,7 +67,7 @@ export default class QuizGenerator {
         // in, which gives the answer away. Rewriting the matrix keeps the turn
         // while leaving `rotation` at 0.
         for (let piece of pieces) {
-            for (let i = randint(0, 3); i > 0; i--) {
+            for (let i = this.random.randint(0, 3); i > 0; i--) {
                 piece.rotateShapeCW()
             }
         }
@@ -91,7 +83,7 @@ export default class QuizGenerator {
             rowDemands,
             colDemands,
             // shuffle the pieces, otherwise the order of the pieces gives away the answer
-            shuffle(pieces),
+            this.random.shuffle(pieces),
             fixed
         )
     }
@@ -104,12 +96,12 @@ export default class QuizGenerator {
 
         // place some random dominoes ("|" or "—") instead of single blocks:
         // this is a simple strategy to avoid lonely blocks in the picture
-        const numStrokes = randint(
+        const numStrokes = this.random.randint(
             Math.max(2, Math.ceil(numRows * numCols / 8)),
             Math.max(4, Math.ceil(numRows * numCols / 4))
         )
         for (let i = 0; i < numStrokes; i++) {
-            const typeId = randint(1, this.numTypes)
+            const typeId = this.random.randint(1, this.numTypes)
 
             const directions: ("|" | "—")[] = []
             if (numRows >= 2) {
@@ -124,27 +116,28 @@ export default class QuizGenerator {
                 continue
             }
 
-            const direction = directions[randint(0, directions.length - 1)]
+            const direction = directions[this.random.randint(0, directions.length - 1)]
             if (direction === "|") {
-                const x = randint(0, numCols - 1)
-                const y = randint(0, numRows - 2)
+                const x = this.random.randint(0, numCols - 1)
+                const y = this.random.randint(0, numRows - 2)
                 matrix[y]![x] = typeId
                 matrix[y + 1]![x] = typeId
             } else {
-                const x = randint(0, numCols - 2)
-                const y = randint(0, numRows - 1)
+                const x = this.random.randint(0, numCols - 2)
+                const y = this.random.randint(0, numRows - 1)
                 matrix[y]![x] = typeId
                 matrix[y]![x + 1] = typeId
             }
         }
 
         // the picture should have at least one kind of symmetry
-        this.applySymmetry(matrix, randint(0, 1))
+        this.applySymmetry(matrix, this.random.randint(0, 1))
 
         // the picture is never empty
         const numBlocks = matrix.reduce((sum, row) => sum + row.filter(typeId => typeId !== 0).length, 0)
         if (numBlocks === 0) {
-            matrix[randint(0, numRows - 1)]![randint(0, numCols - 1)] = randint(1, this.numTypes)
+            matrix[this.random.randint(0, numRows - 1)]![this.random.randint(0, numCols - 1)]
+                = this.random.randint(1, this.numTypes)
         }
 
         return matrix
@@ -229,11 +222,11 @@ export default class QuizGenerator {
         const blocks = group.blocks
 
         // one piece is about 3~6 blocks large
-        const avgPieceSize = randint(3, 6)
+        const avgPieceSize = this.random.randint(3, 6)
         const numSeeds = Math.max(1, Math.min(blocks.length, Math.round(blocks.length / avgPieceSize)))
 
         // randomly pick the seed blocks of the pieces
-        const seeds = shuffle(blocks).slice(0, numSeeds)
+        const seeds = this.random.shuffle(blocks).slice(0, numSeeds)
 
         const pieceIndOfBlock = new Map<number, number>() // blockId -> piece index
         const pieceBlocks: Coord[][] = seeds.map(seed => [seed])
@@ -254,7 +247,7 @@ export default class QuizGenerator {
                     }
                 }
                 if (pieceInds.length > 0) {
-                    candidates.push({blockInd, pieceInds: shuffle(pieceInds)})
+                    candidates.push({blockInd, pieceInds: this.random.shuffle(pieceInds)})
                 }
             }
 
@@ -263,7 +256,7 @@ export default class QuizGenerator {
                 break
             }
 
-            const candidate = candidates[randint(0, candidates.length - 1)]!
+            const candidate = candidates[this.random.randint(0, candidates.length - 1)]!
             // the smallest piece grows first, so that all the pieces end up similar in size
             const pieceInd = candidate.pieceInds.reduce((smallestPieceInd, pieceInd) =>
                 pieceBlocks[pieceInd]!.length < pieceBlocks[smallestPieceInd]!.length ? pieceInd : smallestPieceInd

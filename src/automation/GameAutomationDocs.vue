@@ -113,6 +113,14 @@ const commands = [
                 游戏还会主动推送事件：连上后立刻发 <code>hello</code>，之后每开一关发
                 <code>level.started</code>，两条事件都带完整的最新 <code>state</code>。
             </p>
+            <p>
+                <code>level</code> 里还有 <code>seed</code>：本关的随机种子。面板上可以直接复制它
+                （导出）或一键复制分享链接，也可以把种子填回面板导入，或在地址后加
+                <code>?seed=&lt;种子&gt;</code>。
+                <code>level.seedImported</code> 为 <code>true</code> 时说明这一关是用导入的种子开的：
+                它的分数不计入总得分，<code>submit</code> 结果里的 <code>counted</code> 为
+                <code>false</code>。
+            </p>
         </section>
 
         <section class="docs-section">

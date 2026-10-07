@@ -10,6 +10,8 @@ import {
 import BackHomeButton from '../../components/BackHomeButton.vue';
 import { assetUrl } from '../../utils/asset';
 import { getBackHomeRoom, isPhoneScreen, setPhoneLayoutFlag } from '../../utils/layout';
+import { randomSeed } from '../../utils/random/Random';
+import { readSeedParam } from '../../utils/random/seedParam';
 
 import type GameState from './GameState';
 import type Piece from './Piece';
@@ -222,6 +224,17 @@ const rotateButton = ref<HTMLButtonElement | null>(null)
 const isPhone = ref(isPhoneScreen())
 // already marked on the way in, so that the first frame is not drawn in the wrong shape
 setPhoneLayoutFlag('cargo', isPhone.value)
+
+/**
+ * Seed of the level being played. It fixes the whole deal — board size, the
+ * picture, how it is cut into pieces and how they are turned — so the same seed
+ * always brings the same level back. It is shown in the automation panel and
+ * shipped as `level.seed`; open the page with `?seed=<seed>` to replay a level.
+ */
+const levelSeed = ref('')
+/** True while the level came from an imported seed; its score is not counted. */
+const isImportedLevel = ref(false)
+
 /**
  * True while the rotate button of the phone layout is out, which it is while a
  * piece is selected or being dragged: a phone has no keyboard, so that button
@@ -273,11 +286,12 @@ function getLabelThicknessRatio(numTypes: number) {
 // building the quiz
 // ---------------------------------------------------------------------------
 
-function initRandomQuiz() {
-    const quizGenerator = new QuizGenerator()
+function initRandomQuiz(importedSeed: string | null) {
+    // a level is fixed by its seed: same seed, same picture and same pieces
+    isImportedLevel.value = importedSeed !== null
+    levelSeed.value = importedSeed ?? randomSeed()
+    const quizGenerator = new QuizGenerator(levelSeed.value)
     game = quizGenerator.generate()
-    console.log(quizGenerator.getAnswer())
-    console.log(game)
 
     // drop everything which is left of the previous quiz
     selectedInd = null
@@ -1592,7 +1606,11 @@ function submitAnswer(): CargoSubmitResult | null {
 
     const submittedSatisfaction = roundToTwoDecimals(calcSatisfaction())
     const submittedScore = calcExpectedScore()
-    const submittedTotalScore = roundToTwoDecimals(totalScore.value + submittedScore)
+    // an imported-seed level is scored and shown, it just does not add to the total
+    const counted = !isImportedLevel.value
+    const submittedTotalScore = counted
+        ? roundToTwoDecimals(totalScore.value + submittedScore)
+        : roundToTwoDecimals(totalScore.value)
     totalScore.value = submittedTotalScore
     lastSubmitTime = Date.now()
     // start the 2 s cooldown of the automation protocol as well: the button and a
@@ -1619,15 +1637,46 @@ function submitAnswer(): CargoSubmitResult | null {
         expectedScore: submittedScore,
         totalScore: submittedTotalScore,
         demandMet: submittedSatisfaction >= 1,
+        counted,
     }
 }
 
 
-function startNextQuiz() {
-    initRandomQuiz()
+/**
+ * Deal the next level. `importedSeed` is the seed the player asked for (from
+ * `?seed=` or the automation panel), or null to deal a random one.
+ */
+function startNextQuiz(importedSeed: string | null = null) {
+    initRandomQuiz(importedSeed)
     fitLayout()
     refreshPreview()
     automationBridge.notifyLevelStarted()
+}
+
+/**
+ * Deal a level from a seed the player imported. It plays like any other level,
+ * but its score is deliberately not added to the total: the player picked the
+ * level instead of being dealt a random one.
+ */
+function importSeed(seed: string) {
+    const imported = seed.trim()
+    if (imported === '' || isSubmitting.value) {
+        return
+    }
+    // drop whatever the player is holding before the board swaps
+    cancelPress()
+    isSubmitting.value = true
+    fadePhase.value = 'out'
+    clearFadeTimers()
+    fadeTimerIds.push(window.setTimeout(() => {
+        startNextQuiz(imported)
+        fadePhase.value = 'in'
+        fadeTimerIds.push(window.setTimeout(() => {
+            fadePhase.value = 'idle'
+            isSubmitting.value = false
+            fadeTimerIds = []
+        }, FADE_DURATION))
+    }, FADE_DURATION))
 }
 
 
@@ -1722,6 +1771,8 @@ type CargoSubmitResult = {
     expectedScore: number
     totalScore: number
     demandMet: boolean
+    /** False when the level came from an imported seed, so it did not count. */
+    counted: boolean
 }
 
 /**
@@ -1961,6 +2012,8 @@ const CARGO_AUTOMATION_DOCS: AutomationDocsConfig = {
                         numCols: 4,
                         numTypes: 1,
                         numPieces: 2,
+                        seed: '5b2e9d10',
+                        seedImported: false,
                         actionTypes: CARGO_ACTION_TYPES,
                     },
                     state: {
@@ -2073,12 +2126,15 @@ const CARGO_AUTOMATION_DOCS: AutomationDocsConfig = {
                     expectedScore: 10,
                     totalScore: 20.1,
                     demandMet: true,
+                    counted: true,
                     submittedAt: 1730000000000,
                 },
             },
         },
     ],
     notes: [
+        'level.seed 是本关的种子：复制它，再用 ?seed=<种子> 打开页面即可复现同一关。',
+        'level.seedImported 为 true 时说明这一关是用导入的种子开的：它的分数不计入总得分，submit 结果里的 counted 为 false。',
         'rotation 只写在矩阵外层，piece 的旋转已经烘焙进 shape；把 rotation 设为 0 不会得到出题时的原朝向。',
         '旋转后放不进棋盘、row / col 越界都会被整批拒收并返回 invalid_action。',
         '放上去压到别的块或 fixed 格子时照样放，该 piece 记为 unstable 并红光提示；再动到某个 piece 时会把其余 unstable 的 piece 送回 pieceBar。',
@@ -2104,6 +2160,10 @@ const automationBridge = new GameAutomationBridge<CargoAutomationAction, CargoAu
             numCols: game?.numCols ?? 0,
             numTypes: game?.numTypes ?? 0,
             numPieces: pieceViews.length,
+            // the seed of this level; replay it with `?seed=<seed>`
+            seed: levelSeed.value,
+            // true when the level came from an imported seed, so it does not count
+            seedImported: isImportedLevel.value,
             // always a list, even when the game accepts a single action kind
             actionTypes: CARGO_ACTION_TYPES,
         }
@@ -2140,7 +2200,8 @@ const automationBridge = new GameAutomationBridge<CargoAutomationAction, CargoAu
 // ---------------------------------------------------------------------------
 
 onMounted(() => {
-    startNextQuiz()
+    // a `?seed=` in the URL is an imported seed: the first level does not count
+    startNextQuiz(readSeedParam())
     window.addEventListener('resize', fitLayout)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('pointerdown', onEmptyRoomPointerDown)
@@ -2190,6 +2251,7 @@ onBeforeUnmount(() => {
         <div class="score-value">{{ totalScoreText }}</div>
     </div>
     <div ref="submitArea" class="submit-area">
+        <div v-if="isImportedLevel" class="import-notice">导入种子关 · 本关不计分</div>
         <div class="demand-preview" :class="{ 'is-demand-met': isDemandMet }">
             <div class="preview-row">
                 <span class="preview-label">需求满足度</span>
@@ -2222,6 +2284,9 @@ onBeforeUnmount(() => {
         v-if="!isPhone"
         :bridge="automationBridge"
         :docs="CARGO_AUTOMATION_DOCS"
+        :seed="levelSeed"
+        :seed-imported="isImportedLevel"
+        @import-seed="importSeed"
     />
     <audio :src="BGM_SRC" autoplay loop></audio>
 </template>
@@ -2552,6 +2617,17 @@ html {
     gap: min(2vh, 20px);
 }
 
+.import-notice {
+    padding: 0.2em 0.7em;
+    font-family: 'DymonShouXieTi', sans-serif;
+    font-size: min(1.6vw, 2.4vh);
+    line-height: 1.2;
+    color: #ffe9b3;
+    text-shadow: 0 1px 2px rgba(90, 50, 0, 0.6);
+    background-color: rgba(124, 50, 0, 0.5);
+    border-radius: 999px;
+}
+
 .demand-preview {
     display: flex;
     flex-direction: column;
@@ -2688,6 +2764,10 @@ html {
 
 .is-phone-cargo .demand-preview {
     font-size: clamp(11px, 3.6vw, 17px);
+}
+
+.is-phone-cargo .import-notice {
+    font-size: clamp(11px, 3.4vw, 16px);
 }
 
 .is-phone-cargo .submit-button {
